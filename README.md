@@ -1,3 +1,4 @@
+
 # EdgeArmor
 
 [![Platform: Chrome & Edge](https://img.shields.io/badge/Platform-Chrome%20%7C%20Edge-blue.svg)](#quick-start)
