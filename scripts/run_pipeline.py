@@ -13,7 +13,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Two-stage deepfake image detection pipeline")
     parser.add_argument("--image", required=True, help="Path to input image")
     parser.add_argument("--weights_path", required=True, help="Path to DS checkpoint")
-    parser.add_argument("--config_path", default="ForensicsAdapter/config/test.yaml", help="Path to config yaml")
+    parser.add_argument("--config_path", default=None, help="Path to config yaml (optional)")
     parser.add_argument("--device", default=None, help="cuda:0, cuda, mps, or cpu")
     parser.add_argument("--min_confidence", type=float, default=0.5)
     parser.add_argument("--min_face_size", type=int, default=64)

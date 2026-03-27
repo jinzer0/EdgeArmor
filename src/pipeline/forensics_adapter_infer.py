@@ -6,6 +6,21 @@ from ForensicsAdapter.model.ds import DS
 from .preprocess import build_face_data_dict
 
 
+DEFAULT_INFERENCE_CONFIG = {
+    "clip_model_name": "ViT-L/14",
+    "vit_name": "vit_tiny_patch16_224",
+    "num_quires": 128,
+    "fusion_map": {0: 0, 1: 1, 2: 8, 3: 15},
+    "mlp_dim": 256,
+    "mlp_out_dim": 128,
+    "head_num": 16,
+    "resolution": 256,
+    "mean": [0.48145466, 0.4578275, 0.40821073],
+    "std": [0.26862954, 0.26130258, 0.27577711],
+    "device": None,
+}
+
+
 def resolve_device(requested_device=None, config_device=None):
     candidates = [requested_device, config_device]
     for candidate in candidates:
@@ -54,11 +69,14 @@ class ForensicsAdapterInfer:
         weights_path,
         device=None,
     ):
-        self.config_path = config_path
         self.weights_path = weights_path
 
-        with open(self.config_path, "r") as f:
-            self.config = yaml.safe_load(f)
+        config = DEFAULT_INFERENCE_CONFIG.copy()
+        if config_path and os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                file_config = yaml.safe_load(f) or {}
+            config.update(file_config)
+        self.config = config
 
         self.device = resolve_device(requested_device=device, config_device=self.config.get("device"))
         self.model = DS(
