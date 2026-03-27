@@ -27,6 +27,14 @@
 ## Quick Start
 > Work In Progress - 변경될 수 있음!
 
+- ONNX export
+  - `conda run -n ml3_13 python scripts/export_detector_onnx.py --out_dir artifacts/onnx`
+  - `conda run -n ml3_13 python scripts/export_forensics_adapter_onnx.py --weights_path ckpt_best.pth --config_path ForensicsAdapter/config/test.yaml --out_dir artifacts/onnx`
+- Browser extension
+  - `npm install`
+  - `python scripts/prepare_chrome_extension.py`
+  - Chrome `chrome://extensions`에서 `extension/` 폴더를 unpacked extension으로 로드
+  - 상세 내용은 `docs/browser_extension.md` 참고
 ---
 ## Project Structure
 > Work In Progress - 변경될 수 있음!

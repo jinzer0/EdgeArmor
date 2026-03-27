@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "EdgeArmor",
+  "version": "0.1.0",
+  "description": "Two-stage deepfake image detection extension powered by ONNX Runtime Web.",
+  "action": {
+    "default_title": "EdgeArmor",
+    "default_popup": "popup.html"
+  }
+}

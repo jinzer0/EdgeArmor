@@ -45,3 +45,5 @@ target/
 /dataset/weight/
 /artifacts/onnx/face_detector.onnx
 /artifacts/onnx/forensics_adapter.onnx
+/extension/models/
+/extension/vendor/

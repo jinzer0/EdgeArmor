@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EdgeArmor</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <p class="eyebrow">EdgeArmor</p>
+        <h1>Two-Stage Deepfake Scan</h1>
+        <p class="hero-copy">
+          업로드한 이미지를 브라우저 안에서 바로 분석합니다. 얼굴 탐지 후 각 얼굴 crop을 다시 판별하는
+          two-stage pipeline입니다.
+        </p>
+      </section>
+
+      <section class="upload-card">
+        <label class="dropzone" for="image-input">
+          <span class="dropzone-title">이미지 추가</span>
+          <span class="dropzone-copy">JPEG, PNG, WEBP 파일을 올리면 바로 분석을 시작합니다.</span>
+          <span class="dropzone-meta">현재 모델: detector 12MB + classifier 1.2GB</span>
+        </label>
+        <input id="image-input" type="file" accept="image/*" hidden />
+        <div class="toolbar">
+          <button id="analyze-button" class="primary-button" type="button" disabled>다시 분석</button>
+          <button id="reset-button" class="secondary-button" type="button">초기화</button>
+        </div>
+        <p id="status-text" class="status-text">모델은 첫 실행 시 로드 시간이 길 수 있습니다.</p>
+      </section>
+
+      <section class="result-grid">
+        <article class="preview-card">
+          <div class="section-head">
+            <h2>Preview</h2>
+            <span id="timing-chip" class="timing-chip">idle</span>
+          </div>
+          <canvas id="preview-canvas" class="preview-canvas" width="640" height="640"></canvas>
+        </article>
+
+        <article class="summary-card">
+          <div class="section-head">
+            <h2>Result</h2>
+          </div>
+          <div id="summary-panel" class="summary-panel empty">
+            <p class="summary-title">아직 분석 결과가 없습니다.</p>
+            <p class="summary-copy">이미지를 추가하면 얼굴별 점수와 최종 이미지 판정이 표시됩니다.</p>
+          </div>
+          <div id="face-list" class="face-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
