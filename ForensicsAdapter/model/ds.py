@@ -23,8 +23,14 @@ class DS(nn.Module):
         super().__init__()
         self.device = device
         self.clip_model, self.processor = load(clip_name, device=device,download_root='./dataset/weight')
+        clip_feature_dim = getattr(self.clip_model.visual, "width", None)
+        if clip_feature_dim is None:
+            clip_feature_dim = getattr(self.clip_model.visual, "output_dim", None)
+        if clip_feature_dim is None:
+            clip_feature_dim = 768
         self.adapter = Adapter(vit_name=adapter_vit_name, num_quires=num_quires, fusion_map=fusion_map, mlp_dim=mlp_dim,
-                               mlp_out_dim=mlp_out_dim, head_num=head_num, device=self.device)
+                               mlp_out_dim=mlp_out_dim, head_num=head_num, device=self.device,
+                               clip_feature_dim=clip_feature_dim)
         self.rec_attn_clip = RecAttnClip(self.clip_model.visual, num_quires,device=self.device)  # 全部参数被冻结
         self.masked_xray_post_process = MaskPostXrayProcess(in_c=num_quires).to(self.device)
         self.clip_post_process = PostClipProcess(num_quires=num_quires, embed_dim=768)
@@ -100,7 +106,7 @@ class DS(nn.Module):
         self.correct, self.total = 0, 0
         return {'acc': acc, 'auc': auc, 'eer': eer, 'ap': ap, 'pred': y_pred, 'label': y_true, 'confusion_matrix': cm_list}
 
-    def forward(self, data_dict, inference=False):
+    def _forward_impl(self, data_dict, inference=False, collect_metrics=False):
         images = data_dict['image']
         clip_images = F.interpolate(
             images,
@@ -138,7 +144,7 @@ class DS(nn.Module):
             'loss_clip':loss_clip,
         }
 
-        if inference:
+        if collect_metrics:
             self.prob.append(
                 pred_dict['prob']
                 .detach()
@@ -160,3 +166,22 @@ class DS(nn.Module):
             self.total += data_dict['label'].size(0)
 
         return pred_dict
+
+    def forward(self, data_dict, inference=False):
+        return self._forward_impl(data_dict, inference=inference, collect_metrics=bool(inference))
+
+    def forward_export(self, image, if_boundary):
+        if_boundary = if_boundary.to(device=image.device, dtype=image.dtype)
+        label = torch.zeros(image.shape[0], dtype=torch.long, device=image.device)
+        data_dict = {
+            'image': image,
+            'label': label,
+            'landmark': None,
+            'mask': None,
+            'xray': None,
+            'patch_label': None,
+            'clip_patch_label': None,
+            'if_boundary': if_boundary,
+        }
+        pred_dict = self._forward_impl(data_dict, inference=True, collect_metrics=False)
+        return pred_dict['cls'], pred_dict['prob'], pred_dict['xray_pred']

@@ -15,7 +15,7 @@ def create_if_boundary(batch_size=1, resolution=256, value=1.0, device="cpu"):
     return torch.full((batch_size, patch_num), float(value), dtype=torch.float32, device=device)
 
 
-def build_face_data_dict(face_image, resolution=256, mean=None, std=None, device="cpu", label=0, if_boundary_value=1.0):
+def build_face_image_tensor(face_image, resolution=256, mean=None, std=None, device="cpu"):
     if mean is None:
         mean = [0.48145466, 0.4578275, 0.40821073]
     if std is None:
@@ -30,7 +30,17 @@ def build_face_data_dict(face_image, resolution=256, mean=None, std=None, device
         ]
     )
 
-    image_tensor = preprocess(image).unsqueeze(0).to(device)
+    return preprocess(image).unsqueeze(0).to(device)
+
+
+def build_face_data_dict(face_image, resolution=256, mean=None, std=None, device="cpu", label=0, if_boundary_value=1.0):
+    image_tensor = build_face_image_tensor(
+        face_image,
+        resolution=resolution,
+        mean=mean,
+        std=std,
+        device=device,
+    )
     if_boundary = create_if_boundary(
         batch_size=1,
         resolution=resolution,

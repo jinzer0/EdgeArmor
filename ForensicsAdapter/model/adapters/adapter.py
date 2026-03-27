@@ -36,7 +36,7 @@ class Mask_Decoder(nn.Module):
 
 
 class Adapter(nn.Module):
-    def __init__(self, vit_name, num_quires, fusion_map, mlp_dim, mlp_out_dim, head_num, device):
+    def __init__(self, vit_name, num_quires, fusion_map, mlp_dim, mlp_out_dim, head_num, device, clip_feature_dim=None):
         super().__init__()
         self.device = device
         self.vit_model = create_model(vit_name,
@@ -64,16 +64,20 @@ class Adapter(nn.Module):
         self.ln_pre = VT_LN(self.num_features)
         self.patch_conv = nn.Conv2d(in_channels=3, out_channels=self.num_features, kernel_size=16, stride=16,
                                     bias=True)
+        self.clip_feature_dim = clip_feature_dim if clip_feature_dim is not None else self.num_features
+        self.fusion_layers = nn.ModuleDict(
+            {
+                str(block_idx): Fusion(self.clip_feature_dim, self.num_features)
+                for block_idx in self.fusion_map.keys()
+            }
+        )
 
     def fuse(self, block_idx, x, clip_features, spatial_shape):
         if block_idx in self.fusion_map.keys():
             clip_layer = self.fusion_map[block_idx]
-            clip_dim = clip_features[clip_layer].shape[2]  # clip features NLD
-
-            fusion = Fusion(clip_dim, self.num_features).to(self.device)
             L = spatial_shape[0] * spatial_shape[1]
+            fusion = self.fusion_layers[str(block_idx)]
 
-            # 计算融合后的 patch 特征
             fused_patch = fusion(x[:, -L:, ...], clip_features[clip_layer], spatial_shape)
 
             x[:, -L:, ...] = fused_patch

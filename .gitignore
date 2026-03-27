@@ -41,3 +41,7 @@ venv/
 .gradle/
 *.class
 target/
+/ckpt_best.pth
+/dataset/weight/
+/artifacts/onnx/face_detector.onnx
+/artifacts/onnx/forensics_adapter.onnx
