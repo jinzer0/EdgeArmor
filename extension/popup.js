@@ -1,6 +1,6 @@
-import * as ort from "./vendor/ort.wasm.min.mjs";
-
 const CONFIG = {
+  runtimeMode: "local_server",
+  localServerUrl: "http://127.0.0.1:8765/analyze",
   detectorInputSize: 640,
   classifierInputSize: 256,
   minConfidence: 0.5,
@@ -26,18 +26,16 @@ const previewCanvas = document.getElementById("preview-canvas");
 const previewContext = previewCanvas.getContext("2d");
 const summaryPanel = document.getElementById("summary-panel");
 const faceList = document.getElementById("face-list");
+let ort = null;
 
 const state = {
   file: null,
   image: null,
-  sessionsPromise: null,
-  sessions: null,
+  detectorSessionPromise: null,
+  detectorSession: null,
+  classifierSessionPromise: null,
+  classifierSession: null,
 };
-
-ort.env.wasm.wasmPaths = chrome.runtime.getURL("vendor/");
-ort.env.wasm.numThreads = 1;
-ort.env.wasm.proxy = false;
-ort.env.logLevel = "warning";
 
 imageInput.addEventListener("change", handleFileChange);
 analyzeButton.addEventListener("click", () => {
@@ -57,8 +55,7 @@ async function handleFileChange(event) {
   state.image = await loadImageFromFile(file);
   analyzeButton.disabled = false;
   drawPreviewImage(state.image);
-  setStatus(`이미지 로드 완료: ${file.name}. 분석을 시작합니다.`, "ready");
-  await analyzeSelectedImage();
+  setStatus(`이미지 로드 완료: ${file.name}. 분석 버튼을 눌러 주세요.`, "ready");
 }
 
 async function analyzeSelectedImage() {
@@ -67,14 +64,76 @@ async function analyzeSelectedImage() {
     return;
   }
 
+  if (CONFIG.runtimeMode === "local_server") {
+    await analyzeViaLocalServer();
+    return;
+  }
+
+  await analyzeInBrowser();
+}
+
+async function analyzeViaLocalServer() {
   analyzeButton.disabled = true;
   resetSummary();
   try {
-    const sessions = await getSessions();
     const startedAt = performance.now();
+    setStatus("로컬 추론 서버에 요청 중...", "loading");
+    const response = await fetch(CONFIG.localServerUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": state.file.type || "application/octet-stream",
+      },
+      body: state.file,
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const message = payload?.message || `HTTP ${response.status}`;
+      throw new Error(
+        `로컬 추론 서버 호출에 실패했습니다. ${message}. \`python scripts/run_extension_inference_server.py --weights_path ckpt_best.pth\` 를 먼저 실행해 주세요.`,
+      );
+    }
+
+    if (!payload) {
+      throw new Error("로컬 추론 서버 응답을 해석하지 못했습니다.");
+    }
+
+    if (payload.status === "no_face") {
+      drawOverlay(state.image, []);
+      renderNoFaceResult(payload.num_detected_faces ?? 0);
+      setStatus("얼굴을 찾지 못했습니다.", "done");
+      timingChip.textContent = `${(payload.server_elapsed_ms || 0).toFixed(0)} ms`;
+      return;
+    }
+
+    if (payload.status !== "ok") {
+      throw new Error(payload.message || "로컬 추론 서버가 분석을 완료하지 못했습니다.");
+    }
+
+    const normalizedResult = normalizeServerResult(payload);
+    drawOverlay(state.image, normalizedResult.faces);
+    renderResult(normalizedResult);
+    const elapsed = performance.now() - startedAt;
+    setStatus("분석 완료.", "done");
+    timingChip.textContent = `${elapsed.toFixed(0)} ms`;
+  } catch (error) {
+    console.error(error);
+    renderError(error);
+    setStatus(error.message || "분석 중 오류가 발생했습니다.", "error");
+  } finally {
+    analyzeButton.disabled = !state.file;
+  }
+}
+
+async function analyzeInBrowser() {
+  analyzeButton.disabled = true;
+  resetSummary();
+  try {
+    const startedAt = performance.now();
+    const detectorSession = await getDetectorSession();
     setStatus("얼굴 탐지 중...", "running");
 
-    const detectorResult = await runDetector(sessions.detector, state.image);
+    const detectorResult = await runDetector(detectorSession, state.image);
     if (detectorResult.selectedDetections.length === 0) {
       drawOverlay(state.image, []);
       renderNoFaceResult(detectorResult.detections.length);
@@ -82,13 +141,15 @@ async function analyzeSelectedImage() {
       return;
     }
 
+    setStatus("Classifier 모델 로딩 중...", "loading");
+    const classifierSession = await getClassifierSession();
     setStatus("얼굴별 딥페이크 판별 중...", "running");
     const faceResults = [];
 
     for (let index = 0; index < detectorResult.selectedDetections.length; index += 1) {
       const detection = detectorResult.selectedDetections[index];
       const cropCanvas = cropFaceCanvas(state.image, detection.bbox, CONFIG.margin);
-      const classifierResult = await runClassifier(sessions.classifier, cropCanvas);
+      const classifierResult = await runClassifier(classifierSession, cropCanvas);
       faceResults.push({
         faceIndex: index,
         bbox: detection.bbox.map((value) => Math.round(value)),
@@ -119,33 +180,108 @@ async function analyzeSelectedImage() {
   }
 }
 
-async function getSessions() {
-  if (state.sessions) {
-    return state.sessions;
+function normalizeServerResult(result) {
+  return {
+    status: result.status,
+    imageFake: result.image_fake,
+    imageFakeProb: result.image_fake_prob,
+    imagePredLabel: result.image_pred_label,
+    numDetectedFaces: result.num_detected_faces,
+    numFaces: result.num_faces,
+    faces: (result.faces || []).map((face) => ({
+      faceIndex: face.face_index,
+      bbox: face.bbox,
+      detConfidence: face.det_confidence,
+      fakeProb: face.fake_prob,
+      predLabelId: face.pred_label_id,
+      predLabel: face.pred_label,
+      logits: face.logits,
+      cropSize: face.crop_size,
+    })),
+    summary: {
+      maxFakeProb: result.summary?.max_fake_prob ?? result.image_fake_prob,
+      meanFakeProb: result.summary?.mean_fake_prob ?? result.image_fake_prob,
+      selectedFaceIndex: result.summary?.selected_face_index ?? 0,
+      fakeThreshold: result.summary?.fake_threshold ?? CONFIG.fakeThreshold,
+    },
+  };
+}
+
+async function getDetectorSession() {
+  if (state.detectorSession) {
+    return state.detectorSession;
   }
 
-  if (!state.sessionsPromise) {
-    state.sessionsPromise = (async () => {
-      setStatus("ONNX 모델 로딩 중... classifier가 1.2GB라 첫 실행은 오래 걸립니다.", "loading");
-      const [detector, classifier] = await Promise.all([
-        ort.InferenceSession.create(MODEL_URLS.detector, {
-          executionProviders: ["wasm"],
-          graphOptimizationLevel: "all",
-        }),
-        ort.InferenceSession.create(MODEL_URLS.classifier, {
-          executionProviders: ["wasm"],
-          graphOptimizationLevel: "all",
-        }),
-      ]);
-      state.sessions = { detector, classifier };
-      return state.sessions;
+  if (!state.detectorSessionPromise) {
+    state.detectorSessionPromise = (async () => {
+      const runtime = await ensureOrt();
+      setStatus("Detector 모델 로딩 중...", "loading");
+      const detector = await runtime.InferenceSession.create(MODEL_URLS.detector, {
+        executionProviders: ["wasm"],
+        graphOptimizationLevel: "all",
+      });
+      state.detectorSession = detector;
+      return detector;
     })();
   }
 
-  return state.sessionsPromise;
+  return state.detectorSessionPromise;
+}
+
+async function getClassifierSession() {
+  if (state.classifierSession) {
+    return state.classifierSession;
+  }
+
+  if (!state.classifierSessionPromise) {
+    state.classifierSessionPromise = (async () => {
+      const runtime = await ensureOrt();
+      if (!supportsWebGpu()) {
+        state.classifierSessionPromise = null;
+        throw new Error(
+          "이 classifier 모델은 브라우저에서 WebGPU가 필요합니다. 현재 환경에서 WebGPU를 사용할 수 없어 classifier 로드를 중단했습니다.",
+        );
+      }
+
+      setStatus("Classifier 모델 로딩 중... WebGPU를 사용합니다.", "loading");
+      try {
+        const classifier = await runtime.InferenceSession.create(MODEL_URLS.classifier, {
+          executionProviders: ["webgpu"],
+          graphOptimizationLevel: "all",
+        });
+        state.classifierSession = classifier;
+        return classifier;
+      } catch (error) {
+        state.classifierSessionPromise = null;
+        throw new Error(
+          `Classifier WebGPU 세션 생성에 실패했습니다. wasm fallback은 대형 모델 메모리 문제로 비활성화했습니다. ${error.message || error}`,
+        );
+      }
+    })();
+  }
+
+  return state.classifierSessionPromise;
+}
+
+function supportsWebGpu() {
+  return typeof navigator !== "undefined" && "gpu" in navigator;
+}
+
+async function ensureOrt() {
+  if (ort) {
+    return ort;
+  }
+
+  ort = await import("./vendor/ort.all.min.mjs");
+  ort.env.wasm.wasmPaths = chrome.runtime.getURL("vendor/");
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.proxy = false;
+  ort.env.logLevel = "warning";
+  return ort;
 }
 
 async function runDetector(session, image) {
+  const runtime = await ensureOrt();
   const { canvas, scale, padX, padY } = letterboxImage(image, CONFIG.detectorInputSize);
   const input = tensorFromCanvas(canvas, {
     width: CONFIG.detectorInputSize,
@@ -154,7 +290,7 @@ async function runDetector(session, image) {
   });
   const inputName = session.inputNames[0];
   const feeds = {
-    [inputName]: new ort.Tensor("float32", input, [1, 3, CONFIG.detectorInputSize, CONFIG.detectorInputSize]),
+    [inputName]: new runtime.Tensor("float32", input, [1, 3, CONFIG.detectorInputSize, CONFIG.detectorInputSize]),
   };
   const outputMap = await session.run(feeds);
   const output = outputMap[session.outputNames[0]];
@@ -170,24 +306,30 @@ async function runDetector(session, image) {
 }
 
 async function runClassifier(session, cropCanvas) {
+  const runtime = await ensureOrt();
   const resizedCanvas = resizeCanvas(cropCanvas, CONFIG.classifierInputSize, CONFIG.classifierInputSize);
-  const imageInput = tensorFromCanvas(resizedCanvas, {
+  const imageInputFloat32 = tensorFromCanvas(resizedCanvas, {
     width: CONFIG.classifierInputSize,
     height: CONFIG.classifierInputSize,
     normalize: true,
     mean: CONFIG.mean,
     std: CONFIG.std,
   });
-  const ifBoundary = new Float32Array(256).fill(1.0);
+  const ifBoundaryFloat32 = new Float32Array(256).fill(1.0);
   const feeds = {
-    image: new ort.Tensor("float32", imageInput, [1, 3, CONFIG.classifierInputSize, CONFIG.classifierInputSize]),
-    if_boundary: new ort.Tensor("float32", ifBoundary, [1, 256]),
+    image: new runtime.Tensor(
+      "float16",
+      float32ArrayToFloat16Bits(imageInputFloat32),
+      [1, 3, CONFIG.classifierInputSize, CONFIG.classifierInputSize],
+    ),
+    if_boundary: new runtime.Tensor("float16", float32ArrayToFloat16Bits(ifBoundaryFloat32), [1, 256]),
   };
   const outputs = await session.run(feeds);
-  const logits = Array.from(outputs.logits.data);
+  const logits = Array.from(readTensorAsFloat32(outputs.logits.data));
+  const fakeProb = readTensorAsFloat32(outputs.fake_prob.data)[0];
   return {
     logits,
-    fakeProb: outputs.fake_prob.data[0],
+    fakeProb,
     predLabelId: logits[1] > logits[0] ? 1 : 0,
   };
 }
@@ -335,7 +477,7 @@ function resetUi() {
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   resetSummary();
-  setStatus("모델은 첫 실행 시 로드 시간이 길 수 있습니다.", "idle");
+  setStatus("로컬 추론 서버를 먼저 실행하면 안정적으로 분석할 수 있습니다.", "idle");
 }
 
 function resetSummary() {
@@ -461,6 +603,93 @@ function tensorFromCanvas(canvas, options) {
   }
 
   return output;
+}
+
+function readTensorAsFloat32(data) {
+  if (data instanceof Float32Array) {
+    return data;
+  }
+
+  if (data instanceof Uint16Array) {
+    const output = new Float32Array(data.length);
+    for (let index = 0; index < data.length; index += 1) {
+      output[index] = float16BitsToNumber(data[index]);
+    }
+    return output;
+  }
+
+  return Float32Array.from(data);
+}
+
+function float32ArrayToFloat16Bits(values) {
+  const output = new Uint16Array(values.length);
+  for (let index = 0; index < values.length; index += 1) {
+    output[index] = numberToFloat16Bits(values[index]);
+  }
+  return output;
+}
+
+function numberToFloat16Bits(value) {
+  const floatView = new Float32Array(1);
+  const intView = new Uint32Array(floatView.buffer);
+  floatView[0] = value;
+  const bits = intView[0];
+  const sign = (bits >>> 16) & 0x8000;
+  const mantissa = bits & 0x007fffff;
+  const exponent = (bits >>> 23) & 0xff;
+
+  if (exponent === 0xff) {
+    if (mantissa !== 0) {
+      return sign | 0x7e00;
+    }
+    return sign | 0x7c00;
+  }
+
+  const halfExponent = exponent - 127 + 15;
+  if (halfExponent >= 0x1f) {
+    return sign | 0x7c00;
+  }
+
+  if (halfExponent <= 0) {
+    if (halfExponent < -10) {
+      return sign;
+    }
+
+    const subnormal = (mantissa | 0x00800000) >> (1 - halfExponent);
+    return sign | ((subnormal + 0x00001000) >> 13);
+  }
+
+  return sign | (halfExponent << 10) | ((mantissa + 0x00001000) >> 13);
+}
+
+function float16BitsToNumber(value) {
+  const sign = (value & 0x8000) << 16;
+  let exponent = (value >>> 10) & 0x1f;
+  let mantissa = value & 0x03ff;
+  let bits = 0;
+
+  if (exponent === 0) {
+    if (mantissa === 0) {
+      bits = sign;
+    } else {
+      exponent = 1;
+      while ((mantissa & 0x0400) === 0) {
+        mantissa <<= 1;
+        exponent -= 1;
+      }
+      mantissa &= 0x03ff;
+      bits = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
+    }
+  } else if (exponent === 0x1f) {
+    bits = sign | 0x7f800000 | (mantissa << 13);
+  } else {
+    bits = sign | ((exponent + 127 - 15) << 23) | (mantissa << 13);
+  }
+
+  const intView = new Uint32Array(1);
+  const floatView = new Float32Array(intView.buffer);
+  intView[0] = bits;
+  return floatView[0];
 }
 
 function expandBbox(bbox, margin, imageWidth, imageHeight) {

@@ -10,12 +10,18 @@ ONNX_DIR = os.path.join(PROJECT_ROOT, "artifacts", "onnx")
 ORT_DIST_DIR = os.path.join(PROJECT_ROOT, "node_modules", "onnxruntime-web", "dist")
 
 MODEL_FILES = [
-    "face_detector.onnx",
-    "forensics_adapter.onnx",
+    {
+        "source": "face_detector.onnx",
+        "target": "face_detector.onnx",
+    },
+    {
+        "source": "forensics_adapter.webgpu.fp16.onnx",
+        "target": "forensics_adapter.onnx",
+    },
 ]
 
 VENDOR_FILES = [
-    "ort.wasm.min.mjs",
+    "ort.all.min.mjs",
     "ort-wasm-simd-threaded.wasm",
     "ort-wasm-simd-threaded.mjs",
     "ort-wasm-simd-threaded.jsep.wasm",
@@ -59,18 +65,24 @@ def validate_inputs():
             "onnxruntime-web dist directory not found. Run `npm install` first."
         )
 
-    missing_models = [name for name in MODEL_FILES if not os.path.exists(os.path.join(ONNX_DIR, name))]
+    missing_models = [
+        model_file["source"]
+        for model_file in MODEL_FILES
+        if not os.path.exists(os.path.join(ONNX_DIR, model_file["source"]))
+    ]
     if missing_models:
         raise FileNotFoundError(
-            "Missing ONNX models: " + ", ".join(missing_models)
+            "Missing ONNX models: "
+            + ", ".join(missing_models)
+            + ". Export the browser-safe classifier first."
         )
 
 
 def prepare_models():
     ensure_dir(MODELS_DIR)
-    for filename in MODEL_FILES:
-        source_path = os.path.join(ONNX_DIR, filename)
-        target_path = os.path.join(MODELS_DIR, filename)
+    for model_file in MODEL_FILES:
+        source_path = os.path.join(ONNX_DIR, model_file["source"])
+        target_path = os.path.join(MODELS_DIR, model_file["target"])
         link_or_copy(source_path, target_path)
 
 

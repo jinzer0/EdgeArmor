@@ -47,3 +47,4 @@ target/
 /artifacts/onnx/forensics_adapter.onnx
 /extension/models/
 /extension/vendor/
+/artifacts/onnx/forensics_adapter.webgpu.fp16.onnx
