@@ -12,7 +12,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Benchmark ONNX models for forensics adapter.")
     parser.add_argument(
         "--fp32",
-        default="artifacts/onnx/forensics_adapter.onnx",
+        default="artifacts/onnx/forensics_adapter_fp16.onnx",
         help="FP32 ONNX path",
     )
     parser.add_argument(

@@ -8,17 +8,61 @@ MODELS_DIR = os.path.join(EXTENSION_DIR, "models")
 VENDOR_DIR = os.path.join(EXTENSION_DIR, "vendor")
 ONNX_DIR = os.path.join(PROJECT_ROOT, "artifacts", "onnx")
 ORT_DIST_DIR = os.path.join(PROJECT_ROOT, "node_modules", "onnxruntime-web", "dist")
+CLASSIFIER_ENV_VAR = "EDGEARMOR_CLASSIFIER_ONNX"
 
 MODEL_FILES = [
     {
         "source": "face_detector.onnx",
         "target": "face_detector.onnx",
-    },
-    {
-        "source": "forensics_adapter.webgpu.fp16.onnx",
-        "target": "forensics_adapter.onnx",
-    },
+    }
 ]
+
+HF_CLASSIFIER_PREFER_ORDER = [
+    "model_q4f16.onnx",
+    "model_q4.onnx",
+    "model_int8.onnx",
+    "model_quantized.onnx",
+    "model_uint8.onnx",
+    "model_fp16.onnx",
+    "model_bnb4.onnx",
+]
+
+def resolve_classifier_source():
+    forced = os.environ.get(CLASSIFIER_ENV_VAR)
+    if forced:
+        forced_path = os.path.join(ONNX_DIR, forced)
+        if not os.path.exists(forced_path):
+            raise FileNotFoundError(f"Forced classifier ONNX not found: {forced}")
+        return forced
+
+    hf_candidates = [
+        filename
+        for filename in os.listdir(ONNX_DIR)
+        if filename.startswith("model_") and filename.endswith(".onnx")
+    ]
+    if hf_candidates:
+        for filename in HF_CLASSIFIER_PREFER_ORDER:
+            candidate = os.path.join(ONNX_DIR, filename)
+            if os.path.exists(candidate):
+                return filename
+
+        smallest_model = min(
+            hf_candidates,
+            key=lambda filename: os.path.getsize(os.path.join(ONNX_DIR, filename)),
+        )
+        return smallest_model
+
+    legacy_source = "forensics_adapter.webgpu.fp16.onnx"
+    legacy_path = os.path.join(ONNX_DIR, legacy_source)
+    if os.path.exists(legacy_path):
+        return legacy_source
+
+    for filename in ["forensics_adapter.webgpu.fp16.onnx", "forensics_adapter_fp16.onnx"]:
+        candidate = os.path.join(ONNX_DIR, filename)
+        if os.path.exists(candidate):
+            return filename
+
+    raise FileNotFoundError("No suitable classifier ONNX found in artifacts/onnx. Download model_*.onnx or keep forensics_adapter.webgpu.fp16.onnx.")
 
 VENDOR_FILES = [
     "ort.all.min.mjs",
@@ -67,7 +111,7 @@ def validate_inputs():
 
     missing_models = [
         model_file["source"]
-        for model_file in MODEL_FILES
+        for model_file in get_model_files()
         if not os.path.exists(os.path.join(ONNX_DIR, model_file["source"]))
     ]
     if missing_models:
@@ -80,10 +124,25 @@ def validate_inputs():
 
 def prepare_models():
     ensure_dir(MODELS_DIR)
-    for model_file in MODEL_FILES:
+    for model_file in get_model_files():
         source_path = os.path.join(ONNX_DIR, model_file["source"])
         target_path = os.path.join(MODELS_DIR, model_file["target"])
         link_or_copy(source_path, target_path)
+
+
+def get_model_files():
+    classifier_source = resolve_classifier_source()
+    classifier_target = "forensics_adapter_fp16.onnx"
+    if classifier_source.startswith("model_"):
+        classifier_target = "model.onnx"
+
+    return [
+        *MODEL_FILES,
+        {
+            "source": classifier_source,
+            "target": classifier_target,
+        },
+    ]
 
 
 def prepare_vendor():
