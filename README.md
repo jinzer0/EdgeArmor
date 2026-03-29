@@ -21,18 +21,18 @@
 | Layer | Tech |
 | :--- | :--- |
 | Frontend | HTML5, CSS3, JavaScript (ES6+), Manifest V3 |
-| AI / ML | TensorFlow.js, ONNX Runtime Web |
+| AI / ML | MediaPipe Tasks Vision, ONNX Runtime Web |
 | Build | Webpack / Vite |
 ---
 ## Quick Start
 > Work In Progress - 변경될 수 있음!
 
-- ONNX export
-  - `conda run -n ml3_13 python scripts/export_detector_onnx.py --out_dir artifacts/onnx`
+- Classifier ONNX export
   - `conda run -n ml3_13 python scripts/export_forensics_adapter_onnx.py --weights_path ckpt_best.pth --config_path ForensicsAdapter/config/test.yaml --out_dir artifacts/onnx`
 - Browser extension
   - `npm install`
   - `python scripts/prepare_chrome_extension.py`
+  - face detector는 MediaPipe 모델을 자동 다운로드해 사용
   - Chrome `chrome://extensions`에서 `extension/` 폴더를 unpacked extension으로 로드
   - 상세 내용은 `docs/browser_extension.md` 참고
 ---
