@@ -8,6 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import onnx
+import onnxruntime as ort
 import torch
 from torch import nn
 
@@ -29,7 +30,12 @@ def parse_args():
     parser.add_argument("--weights_path", required=True, help="Path to ckpt_best.pth")
     parser.add_argument("--config_path", default="ForensicsAdapter/config/test.yaml", help="Path to YAML config")
     parser.add_argument("--out_dir", default="artifacts/onnx", help="Directory for exported ONNX files")
-    parser.add_argument("--filename", default="forensics_adapter.onnx", help="Exported ONNX filename")
+    parser.add_argument("--filename", default="forensics_adapter_fp16.onnx", help="Exported ONNX filename")
+    parser.add_argument(
+        "--browser_filename",
+        default="forensics_adapter.webgpu.fp16.onnx",
+        help="Browser-targeted FP16 ONNX filename",
+    )
     parser.add_argument("--opset", type=int, default=17, help="ONNX opset")
     parser.add_argument("--seed", type=int, default=0, help="Seed used for export-time module initialization")
     return parser.parse_args()
@@ -64,6 +70,36 @@ def collect_contract(model_path):
     }
 
 
+def export_browser_model(source_path, output_path):
+    from onnx import helper
+    from onnxconverter_common import float16
+
+    model = onnx.load(source_path)
+    model = float16.convert_float_to_float16(
+        model,
+        keep_io_types=False,
+        disable_shape_infer=True,
+        op_block_list=[],
+    )
+
+    for node in model.graph.node:
+        if node.op_type != "Cast":
+            continue
+        for attribute in node.attribute:
+            if attribute.name == "to" and helper.get_attribute_value(attribute) == onnx.TensorProto.FLOAT:
+                attribute.i = onnx.TensorProto.FLOAT16
+
+    onnx.checker.check_model(model)
+    onnx.save_model(model, output_path)
+
+    session = ort.InferenceSession(output_path, providers=["CPUExecutionProvider"])
+    return {
+        "path": output_path,
+        "inputs": [{"name": value.name, "type": value.type} for value in session.get_inputs()],
+        "outputs": [{"name": value.name, "type": value.type} for value in session.get_outputs()],
+    }
+
+
 def main():
     args = parse_args()
     ensure_dir(args.out_dir)
@@ -95,12 +131,15 @@ def main():
     )
 
     contract = collect_contract(output_path)
+    browser_output_path = os.path.join(args.out_dir, args.browser_filename)
+    browser_contract = export_browser_model(output_path, browser_output_path)
     contract["config"] = {
         "resolution": resolution,
         "patch_num": patch_num,
         "mean": infer.config["mean"],
         "std": infer.config["std"],
     }
+    contract["browser_webgpu_fp16"] = browser_contract
     print(json.dumps(contract, ensure_ascii=False, indent=2))
 
 

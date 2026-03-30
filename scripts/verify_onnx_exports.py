@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--weights_path", required=True, help="Path to ckpt_best.pth")
     parser.add_argument("--config_path", default="ForensicsAdapter/config/test.yaml", help="Path to YAML config")
     parser.add_argument("--detector_onnx", default="artifacts/onnx/face_detector.onnx", help="Detector ONNX path")
-    parser.add_argument("--classifier_onnx", default="artifacts/onnx/forensics_adapter.onnx", help="Classifier ONNX path")
+    parser.add_argument("--classifier_onnx", default="artifacts/onnx/forensics_adapter_fp16.onnx", help="Classifier ONNX path")
     parser.add_argument("--seed", type=int, default=0, help="Seed used for deterministic model initialization")
     parser.add_argument("--classifier_atol", type=float, default=1e-3, help="Classifier parity absolute tolerance")
     parser.add_argument("--min_confidence", type=float, default=0.5)
@@ -166,7 +166,7 @@ def compare_detector_outputs(pytorch_detections, onnx_detections):
     }
 
 
-def build_classifier_onnx_inputs(face_image, config):
+def build_classifier_onnx_inputs(face_image, config, input_type="tensor(float)"):
     resolution = int(config["resolution"])
     image_tensor = build_face_image_tensor(
         face_image,
@@ -181,9 +181,16 @@ def build_classifier_onnx_inputs(face_image, config):
         value=1.0,
         device="cpu",
     )
+    image_array = image_tensor.numpy()
+    if_boundary_array = if_boundary.numpy()
+
+    if input_type == "tensor(float16)":
+        image_array = image_array.astype(np.float16)
+        if_boundary_array = if_boundary_array.astype(np.float16)
+
     return {
-        "image": image_tensor.numpy(),
-        "if_boundary": if_boundary.numpy(),
+        "image": image_array,
+        "if_boundary": if_boundary_array,
     }
 
 
@@ -285,7 +292,15 @@ def main():
     if not pytorch_crops:
         raise RuntimeError("No face crop found in the provided image for classifier verification.")
 
-    classifier_inputs = build_classifier_onnx_inputs(pytorch_crops[0], infer.config)
+    classifier_input_type = classifier_session.get_inputs()[0].type
+    classifier_atol = args.classifier_atol
+    if classifier_input_type == "tensor(float16)":
+        classifier_atol = max(classifier_atol, 1e-2)
+    classifier_inputs = build_classifier_onnx_inputs(
+        pytorch_crops[0],
+        infer.config,
+        input_type=classifier_input_type,
+    )
     classifier_outputs = run_classifier_onnx(classifier_session, classifier_inputs)
     pytorch_pred = infer.predict(pytorch_crops[0])
 
@@ -301,15 +316,20 @@ def main():
             "image_shape": list(classifier_inputs["image"].shape),
             "if_boundary_shape": list(classifier_inputs["if_boundary"].shape),
         },
+        "atol": classifier_atol,
     }
     classifier_report["within_tolerance"] = (
-        classifier_report["logits_max_abs_diff"] <= args.classifier_atol
-        and classifier_report["fake_prob_abs_diff"] <= args.classifier_atol
+        classifier_report["logits_max_abs_diff"] <= classifier_atol
+        and classifier_report["fake_prob_abs_diff"] <= classifier_atol
     )
 
     onnx_face_predictions = []
     for idx, crop in enumerate(onnx_crops):
-        crop_inputs = build_classifier_onnx_inputs(crop, infer.config)
+        crop_inputs = build_classifier_onnx_inputs(
+            crop,
+            infer.config,
+            input_type=classifier_input_type,
+        )
         crop_outputs = run_classifier_onnx(classifier_session, crop_inputs)
         logits = np.asarray(crop_outputs["logits"]).reshape(1, -1)[0]
         fake_prob = float(np.asarray(crop_outputs["fake_prob"]).reshape(-1)[0])
