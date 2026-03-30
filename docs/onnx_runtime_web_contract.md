@@ -100,5 +100,5 @@ python scripts/export_forensics_adapter_onnx.py --weights_path /path/to/ckpt_bes
 
 - parity verification
 ```bash
-python scripts/verify_onnx_exports.py --image /path/to/image --weights_path /path/to/ckpt_best.pth --detector_onnx artifacts/onnx/face_detector.onnx --classifier_onnx artifacts/onnx/forensics_adapter.onnx
+python scripts/verify_onnx_exports.py --image /path/to/image --weights_path /path/to/ckpt_best.pth --detector_onnx artifacts/onnx/face_detector.onnx --classifier_onnx artifacts/onnx/forensics_adapter_fp16.onnx
 ```

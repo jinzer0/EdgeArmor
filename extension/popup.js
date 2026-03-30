@@ -1,20 +1,25 @@
 const CONFIG = {
-  runtimeMode: "local_server",
+  runtimeMode: "browser",
   localServerUrl: "http://127.0.0.1:8765/analyze",
   detectorInputSize: 640,
   classifierInputSize: 256,
   minConfidence: 0.5,
   minFaceSize: 64,
   topK: 3,
-  margin: 0.25,
+  margin: 0.4,
   fakeThreshold: 0.5,
   mean: [0.48145466, 0.4578275, 0.40821073],
   std: [0.26862954, 0.26130258, 0.27577711],
+  hfMean: [0.5, 0.5, 0.5],
+  hfStd: [0.5, 0.5, 0.5],
 };
+
+const HF_DEEPFAKE_CLASS_INDEX = 1;
+const CLASSIFIER_ONNX_FILE = "model.onnx";
 
 const MODEL_URLS = {
   detector: chrome.runtime.getURL("models/face_detector.onnx"),
-  classifier: chrome.runtime.getURL("models/forensics_adapter.onnx"),
+  classifier: chrome.runtime.getURL(`models/${CLASSIFIER_ONNX_FILE}`),
 };
 
 const statusText = document.getElementById("status-text");
@@ -236,27 +241,31 @@ async function getClassifierSession() {
   if (!state.classifierSessionPromise) {
     state.classifierSessionPromise = (async () => {
       const runtime = await ensureOrt();
-      if (!supportsWebGpu()) {
-        state.classifierSessionPromise = null;
-        throw new Error(
-          "이 classifier 모델은 브라우저에서 WebGPU가 필요합니다. 현재 환경에서 WebGPU를 사용할 수 없어 classifier 로드를 중단했습니다.",
-        );
+      const executionProviders = [];
+
+      if (supportsWebGpu()) {
+        executionProviders.push("webgpu");
+      }
+      executionProviders.push("wasm");
+
+      let lastError = null;
+      for (const provider of executionProviders) {
+        try {
+          setStatus(`Classifier 모델 로딩 중... ${provider.toUpperCase()} 사용`, "loading");
+          const classifier = await runtime.InferenceSession.create(MODEL_URLS.classifier, {
+            executionProviders: [provider],
+            graphOptimizationLevel: "all",
+          });
+          state.classifierSession = classifier;
+          return classifier;
+        } catch (error) {
+          lastError = error;
+        }
       }
 
-      setStatus("Classifier 모델 로딩 중... WebGPU를 사용합니다.", "loading");
-      try {
-        const classifier = await runtime.InferenceSession.create(MODEL_URLS.classifier, {
-          executionProviders: ["webgpu"],
-          graphOptimizationLevel: "all",
-        });
-        state.classifierSession = classifier;
-        return classifier;
-      } catch (error) {
-        state.classifierSessionPromise = null;
-        throw new Error(
-          `Classifier WebGPU 세션 생성에 실패했습니다. wasm fallback은 대형 모델 메모리 문제로 비활성화했습니다. ${error.message || error}`,
-        );
-      }
+      state.classifierSessionPromise = null;
+      const message = `Classifier ONNX 세션을 생성하지 못했습니다. webgpu/wasm 모두 실패했습니다. ${lastError?.message || lastError}`;
+      throw new Error(message);
     })();
   }
 
@@ -307,31 +316,112 @@ async function runDetector(session, image) {
 
 async function runClassifier(session, cropCanvas) {
   const runtime = await ensureOrt();
-  const resizedCanvas = resizeCanvas(cropCanvas, CONFIG.classifierInputSize, CONFIG.classifierInputSize);
+  const classifierSpec = detectClassifierSpec(session);
+  const resizedCanvas = resizeCanvas(
+    cropCanvas,
+    classifierSpec.inputSize,
+    classifierSpec.inputSize,
+  );
   const imageInputFloat32 = tensorFromCanvas(resizedCanvas, {
-    width: CONFIG.classifierInputSize,
-    height: CONFIG.classifierInputSize,
+    width: classifierSpec.inputSize,
+    height: classifierSpec.inputSize,
     normalize: true,
-    mean: CONFIG.mean,
-    std: CONFIG.std,
+    mean: classifierSpec.mean,
+    std: classifierSpec.std,
   });
-  const ifBoundaryFloat32 = new Float32Array(256).fill(1.0);
+  const data = classifierSpec.useFloat16 ? float32ArrayToFloat16Bits(imageInputFloat32) : imageInputFloat32;
   const feeds = {
-    image: new runtime.Tensor(
+    [classifierSpec.inputName]: new runtime.Tensor(classifierSpec.tensorType, data, [1, 3, classifierSpec.inputSize, classifierSpec.inputSize]),
+  };
+
+  if (classifierSpec.includeBoundaryInput) {
+    const ifBoundaryFloat32 = new Float32Array(256).fill(1.0);
+    feeds.if_boundary = new runtime.Tensor(
       "float16",
-      float32ArrayToFloat16Bits(imageInputFloat32),
-      [1, 3, CONFIG.classifierInputSize, CONFIG.classifierInputSize],
-    ),
-    if_boundary: new runtime.Tensor("float16", float32ArrayToFloat16Bits(ifBoundaryFloat32), [1, 256]),
-  };
+      float32ArrayToFloat16Bits(ifBoundaryFloat32),
+      [1, 256],
+    );
+  }
+
   const outputs = await session.run(feeds);
-  const logits = Array.from(readTensorAsFloat32(outputs.logits.data));
-  const fakeProb = readTensorAsFloat32(outputs.fake_prob.data)[0];
+  return parseClassifierOutput(outputs);
+}
+
+function detectClassifierSpec(session) {
+  const hasPixelValuesInput = session.inputNames.includes("pixel_values");
+  const inputName = hasPixelValuesInput ? "pixel_values" : "image";
+  const modelInputSize = getModelInputSpatialSize(session, inputName);
+
   return {
-    logits,
-    fakeProb,
-    predLabelId: logits[1] > logits[0] ? 1 : 0,
+    inputName,
+    inputSize: hasPixelValuesInput ? (modelInputSize || 224) : (modelInputSize || CONFIG.classifierInputSize),
+    mean: hasPixelValuesInput ? CONFIG.hfMean : CONFIG.mean,
+    std: hasPixelValuesInput ? CONFIG.hfStd : CONFIG.std,
+    tensorType: hasPixelValuesInput ? "float32" : "float16",
+    includeBoundaryInput: !hasPixelValuesInput,
+    useFloat16: !hasPixelValuesInput,
   };
+}
+
+function getModelInputSpatialSize(session, inputName) {
+  const metadata = session.inputMetadata?.[inputName];
+  if (!metadata || !Array.isArray(metadata.dims)) {
+    return null;
+  }
+
+  const height = metadata.dims[2];
+  const width = metadata.dims[3];
+  if (Number.isInteger(height) && Number.isInteger(width) && height > 0 && width > 0) {
+    return Math.min(height, width);
+  }
+
+  return null;
+}
+
+function parseClassifierOutput(outputs) {
+  const logitsTensor = outputs.logits || findTensor(outputs, (name, tensor) => {
+    const dims = tensor?.dims || [];
+    return name !== "fake_prob" && dims.length === 2 && Number.isInteger(dims[dims.length - 1]) && dims[dims.length - 1] > 1;
+  });
+  const fakeProbTensor = outputs.fake_prob;
+
+  const logits = logitsTensor ? Array.from(readTensorAsFloat32(logitsTensor.data)) : [];
+  const pred = {
+    logits,
+    fakeProb: 0,
+    predLabelId: 0,
+  };
+
+  if (fakeProbTensor) {
+    pred.fakeProb = readTensorAsFloat32(fakeProbTensor.data)[0];
+    pred.predLabelId = logits.length >= 2 && logits[1] > logits[0] ? 1 : pred.fakeProb >= CONFIG.fakeThreshold ? 1 : 0;
+    return pred;
+  }
+
+  if (logits.length === 0) {
+    throw new Error("Classifier 출력에서 logits 또는 fake_prob를 찾지 못했습니다.");
+  }
+
+  const probs = softmax(logits);
+  pred.fakeProb = probs[HF_DEEPFAKE_CLASS_INDEX] ?? probs[1] ?? probs[0];
+  pred.predLabelId = pred.fakeProb >= CONFIG.fakeThreshold ? 1 : 0;
+  return pred;
+}
+
+function findTensor(outputs, predicate) {
+  for (const [name, tensor] of Object.entries(outputs)) {
+    if (predicate(name, tensor)) {
+      return tensor;
+    }
+  }
+  return null;
+}
+
+function softmax(values) {
+  const maxValue = Math.max(...values);
+  const expValues = values.map((value) => Math.exp(value - maxValue));
+  const total = expValues.reduce((acc, value) => acc + value, 0);
+  return expValues.map((value) => value / total);
 }
 
 function parseDetectorOutput(data, dims, metadata) {
@@ -477,7 +567,7 @@ function resetUi() {
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   resetSummary();
-  setStatus("로컬 추론 서버를 먼저 실행하면 안정적으로 분석할 수 있습니다.", "idle");
+  setStatus("브라우저에서 ONNX로 바로 분석합니다.", "idle");
 }
 
 function resetSummary() {

@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--weights_path", required=True, help="Path to ckpt_best.pth")
     parser.add_argument("--config_path", default="ForensicsAdapter/config/test.yaml", help="Path to YAML config")
     parser.add_argument("--out_dir", default="artifacts/onnx", help="Directory for exported ONNX files")
-    parser.add_argument("--filename", default="forensics_adapter.onnx", help="Exported ONNX filename")
+    parser.add_argument("--filename", default="forensics_adapter_fp16.onnx", help="Exported ONNX filename")
     parser.add_argument(
         "--browser_filename",
         default="forensics_adapter.webgpu.fp16.onnx",

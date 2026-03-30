@@ -8,15 +8,14 @@
 >
 > 서버 전송 없이, 브라우저 안에서만 탐지하고 방어합니다.
 
-## 현재 작업 브랜치: `codex/extension-runtime`    
-
+## 현재 작업 브랜치: `codex/mediapipe-face-detection`    
 **[프로젝트 구조 보러가기](#project-structure)**
 ---
 ## Highlights
 
 - 실시간 이미지 탐지
-- 얼굴 검출 후 얼굴별 딥페이크 판별
-- Chrome popup + 로컬 Python 추론 서버
+- 업로드 이미지 방어 노이즈 주입
+- 브라우저 로컬 추론
 - Chrome / Edge 지원
 ---
 ## Stack
@@ -25,9 +24,8 @@
 | Layer | Tech |
 | :--- | :--- |
 | Frontend | HTML5, CSS3, JavaScript (ES6+), Manifest V3 |
-| Browser Runtime | ONNX Runtime Web |
-| Python Inference | PyTorch, Ultralytics YOLOv8-Face, Pillow |
-| Model Assets | ONNX exports, `ckpt_best.pth`, `ViT-L-14.pt` |
+| AI / ML | TensorFlow.js, ONNX Runtime Web |
+| Build | Webpack / Vite |
 ---
 ## Quick Start
 > Work In Progress - 변경될 수 있음!
@@ -38,7 +36,6 @@
 - Browser extension
   - `npm install`
   - `python scripts/prepare_chrome_extension.py`
-  - `conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_path ckpt_best.pth`
   - Chrome `chrome://extensions`에서 `extension/` 폴더를 unpacked extension으로 로드
   - 상세 내용은 `docs/browser_extension.md` 참고
 ---
@@ -58,28 +55,32 @@ EdgeArmor/
 │   ├── popup.html
 │   ├── popup.css
 │   ├── popup.js
-│   ├── models/                           # gitignored, extension 실행 필수
-│   │   ├── face_detector.onnx
-│   │   ├── forensics_adapter.onnx
-│   │   ├── forensics_adapter_fp16.onnx
+│   ├── image_utils.js
+│   ├── mediapipe_face_detector.js
+│   ├── models/                         # gitignored, extension 실행 필수 산출물
+│   │   ├── blaze_face_short_range.tflite
 │   │   ├── model.onnx
 │   │   ├── model_fp16.onnx
 │   │   ├── model_int8.onnx
 │   │   ├── model_q4f16.onnx
-│   │   └── blaze_face_short_range.tflite
-│   └── vendor/                           # gitignored, ORT Web 런타임
+│   │   ├── forensics_adapter.onnx
+│   │   └── forensics_adapter_fp16.onnx
+│   └── vendor/                         # gitignored, extension 실행 필수 런타임 파일
 │       ├── ort.all.min.mjs
-│       ├── ort.wasm.min.mjs
-│       ├── ort-wasm-simd-threaded.wasm
-│       ├── ort-wasm-simd-threaded.mjs
-│       ├── ort-wasm-simd-threaded.jsep.wasm
-│       ├── ort-wasm-simd-threaded.jsep.mjs
-│       ├── ort-wasm-simd-threaded.asyncify.wasm
-│       ├── ort-wasm-simd-threaded.asyncify.mjs
-│       ├── ort-wasm-simd-threaded.jspi.wasm
-│       └── ort-wasm-simd-threaded.jspi.mjs
+│       ├── ort-wasm-*.wasm
+│       └── mediapipe/
+│           ├── vision_bundle.mjs
+│           └── wasm/
+│               ├── vision_wasm_internal.js
+│               ├── vision_wasm_internal.wasm
+│               ├── vision_wasm_module_internal.js
+│               ├── vision_wasm_module_internal.wasm
+│               ├── vision_wasm_nosimd_internal.js
+│               └── vision_wasm_nosimd_internal.wasm
 ├── artifacts/
-│   └── onnx/                             # gitignored, export 산출물
+│   ├── mediapipe/                      # gitignored, prepare 스크립트가 캐시
+│   │   └── blaze_face_short_range.tflite
+│   └── onnx/                           # gitignored, 원본/변환 모델 저장소
 │       ├── face_detector.onnx
 │       ├── forensics_adapter.onnx
 │       ├── forensics_adapter.webgpu.fp16.onnx
@@ -100,7 +101,6 @@ EdgeArmor/
 │   ├── detection/
 │   │   └── FaceDetection.py
 │   └── pipeline/
-│       ├── __init__.py
 │       ├── deepfake_pipeline.py
 │       ├── face_selector.py
 │       ├── forensics_adapter_infer.py
@@ -111,25 +111,21 @@ EdgeArmor/
 │   ├── model/
 │   ├── trainer/
 │   ├── train.py
-│   ├── test.py
-│   └── visualize_attention.py
+│   └── test.py
 ├── dataset/
 │   └── weight/
-│       └── ViT-L-14.pt                  # gitignored, ForensicsAdapter 실행 필수
-├── ckpt_best.pth                        # gitignored, 서버/모델 export 필수
-└── things.md
+│       └── ViT-L-14.pt                # gitignored, ForensicsAdapter 실행 필수
+└── ckpt_best.pth                      # gitignored, classifier export/server 실행 필수
 ```
 
 필수 gitignored 파일 메모:
 
-- `ckpt_best.pth`: Python 딥페이크 분류기 가중치
+- `ckpt_best.pth`: Python deepfake classifier 가중치
 - `dataset/weight/ViT-L-14.pt`: ForensicsAdapter 백본 로딩에 필요
-- `artifacts/onnx/face_detector.onnx`: 브라우저 detector 실험 경로 및 검증 스크립트 입력
-- `artifacts/onnx/forensics_adapter.onnx`: 원본 classifier ONNX
-- `artifacts/onnx/forensics_adapter.webgpu.fp16.onnx`: extension 배포용 classifier 복사 원본
-- `extension/models/*`: popup이 실제로 로드하는 모델 복사본
-- `extension/vendor/*`: ORT Web wasm/runtime 파일
-
+- `artifacts/onnx/*.onnx`: export, quantize, verify, extension 모델 준비의 입력
+- `artifacts/mediapipe/blaze_face_short_range.tflite`: MediaPipe detector 캐시
+- `extension/models/*`: 실제 Chrome extension이 직접 로드하는 모델 복사본
+- `extension/vendor/*`: ORT Web 및 MediaPipe runtime 번들
 
 ---
 ## Checklist

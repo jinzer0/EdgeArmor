@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--weights_path", required=True, help="Path to ckpt_best.pth")
     parser.add_argument("--config_path", default="ForensicsAdapter/config/test.yaml", help="Path to YAML config")
     parser.add_argument("--detector_onnx", default="artifacts/onnx/face_detector.onnx", help="Detector ONNX path")
-    parser.add_argument("--classifier_onnx", default="artifacts/onnx/forensics_adapter.onnx", help="Classifier ONNX path")
+    parser.add_argument("--classifier_onnx", default="artifacts/onnx/forensics_adapter_fp16.onnx", help="Classifier ONNX path")
     parser.add_argument("--seed", type=int, default=0, help="Seed used for deterministic model initialization")
     parser.add_argument("--classifier_atol", type=float, default=1e-3, help="Classifier parity absolute tolerance")
     parser.add_argument("--min_confidence", type=float, default=0.5)

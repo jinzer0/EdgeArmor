@@ -44,7 +44,13 @@ target/
 /ckpt_best.pth
 /dataset/weight/
 /artifacts/onnx/face_detector.onnx
-/artifacts/onnx/forensics_adapter.onnx
+/artifacts/onnx/forensics_adapter_full.onnx
 /extension/models/
 /extension/vendor/
 /artifacts/onnx/forensics_adapter.webgpu.fp16.onnx
+/artifacts/onnx/forensics_adapter.onnx
+/artifacts/onnx/forensics_adapter.webgpu.fp16.onnx
+/artifacts/onnx/model_bnb4.onnx
+/artifacts/onnx/model_q4.onnx
+/artifacts/onnx/model_quantized.onnx
+/artifacts/onnx/model_uint8.onnx

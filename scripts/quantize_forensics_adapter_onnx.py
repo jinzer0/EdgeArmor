@@ -15,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Create INT8 ONNX model for forensics adapter.")
     parser.add_argument(
         "--source",
-        default="artifacts/onnx/forensics_adapter.onnx",
+        default="artifacts/onnx/forensics_adapter_fp16.onnx",
         help="Source FP32 ONNX path",
     )
     parser.add_argument(
