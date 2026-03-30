@@ -1,4 +1,9 @@
-import { cropFaceToCanvas, fitCanvas, resizeCanvas, tensorFromCanvas } from "./image_utils.js";
+import {
+  cropFaceToCanvas,
+  fitCanvas,
+  resizeCanvas,
+  tensorFromCanvas,
+} from "./image_utils.js";
 import { detectFacesWithMediaPipe } from "./mediapipe_face_detector.js";
 
 const CONFIG = {
@@ -18,7 +23,7 @@ const CONFIG = {
 };
 
 const HF_DEEPFAKE_CLASS_INDEX = 1;
-const CLASSIFIER_ONNX_FILE = "model.onnx";
+const CLASSIFIER_ONNX_FILE = "forensics_adapter_fp16.onnx";
 
 const MODEL_URLS = {
   classifier: chrome.runtime.getURL(`models/${CLASSIFIER_ONNX_FILE}`),
@@ -60,7 +65,10 @@ async function handleFileChange(event) {
   state.image = await loadImageFromFile(file);
   analyzeButton.disabled = false;
   drawPreviewImage(state.image);
-  setStatus(`이미지 로드 완료: ${file.name}. 분석 버튼을 눌러 주세요.`, "ready");
+  setStatus(
+    `이미지 로드 완료: ${file.name}. 분석 버튼을 눌러 주세요.`,
+    "ready",
+  );
 }
 
 async function analyzeSelectedImage() {
@@ -112,7 +120,9 @@ async function analyzeViaLocalServer() {
     }
 
     if (payload.status !== "ok") {
-      throw new Error(payload.message || "로컬 추론 서버가 분석을 완료하지 못했습니다.");
+      throw new Error(
+        payload.message || "로컬 추론 서버가 분석을 완료하지 못했습니다.",
+      );
     }
 
     const normalizedResult = normalizeServerResult(payload);
@@ -149,10 +159,21 @@ async function analyzeInBrowser() {
     setStatus("얼굴별 딥페이크 판별 중...", "running");
     const faceResults = [];
 
-    for (let index = 0; index < detectorResult.selectedDetections.length; index += 1) {
+    for (
+      let index = 0;
+      index < detectorResult.selectedDetections.length;
+      index += 1
+    ) {
       const detection = detectorResult.selectedDetections[index];
-      const cropCanvas = cropFaceToCanvas(state.image, detection.bbox, CONFIG.margin);
-      const classifierResult = await runClassifier(classifierSession, cropCanvas);
+      const cropCanvas = cropFaceToCanvas(
+        state.image,
+        detection.bbox,
+        CONFIG.margin,
+      );
+      const classifierResult = await runClassifier(
+        classifierSession,
+        cropCanvas,
+      );
       faceResults.push({
         faceIndex: index,
         bbox: detection.bbox.map((value) => Math.round(value)),
@@ -160,7 +181,8 @@ async function analyzeInBrowser() {
         fakeProb: classifierResult.fakeProb,
         predLabelId: classifierResult.predLabelId,
         predLabel:
-          classifierResult.predLabelId === 1 && classifierResult.fakeProb >= CONFIG.fakeThreshold
+          classifierResult.predLabelId === 1 &&
+          classifierResult.fakeProb >= CONFIG.fakeThreshold
             ? "fake"
             : "real",
         logits: classifierResult.logits,
@@ -168,7 +190,10 @@ async function analyzeInBrowser() {
       });
     }
 
-    const aggregate = aggregateResults(faceResults, detectorResult.detections.length);
+    const aggregate = aggregateResults(
+      faceResults,
+      detectorResult.detections.length,
+    );
     drawOverlay(state.image, faceResults);
     renderResult(aggregate);
     const elapsed = performance.now() - startedAt;
@@ -228,11 +253,17 @@ async function getClassifierSession() {
       let lastError = null;
       for (const provider of executionProviders) {
         try {
-          setStatus(`Classifier 모델 로딩 중... ${provider.toUpperCase()} 사용`, "loading");
-          const classifier = await runtime.InferenceSession.create(MODEL_URLS.classifier, {
-            executionProviders: [provider],
-            graphOptimizationLevel: "all",
-          });
+          setStatus(
+            `Classifier 모델 로딩 중... ${provider.toUpperCase()} 사용`,
+            "loading",
+          );
+          const classifier = await runtime.InferenceSession.create(
+            MODEL_URLS.classifier,
+            {
+              executionProviders: [provider],
+              graphOptimizationLevel: "all",
+            },
+          );
           state.classifierSession = classifier;
           return classifier;
         } catch (error) {
@@ -291,9 +322,15 @@ async function runClassifier(session, cropCanvas) {
     mean: classifierSpec.mean,
     std: classifierSpec.std,
   });
-  const data = classifierSpec.useFloat16 ? float32ArrayToFloat16Bits(imageInputFloat32) : imageInputFloat32;
+  const data = classifierSpec.useFloat16
+    ? float32ArrayToFloat16Bits(imageInputFloat32)
+    : imageInputFloat32;
   const feeds = {
-    [classifierSpec.inputName]: new runtime.Tensor(classifierSpec.tensorType, data, [1, 3, classifierSpec.inputSize, classifierSpec.inputSize]),
+    [classifierSpec.inputName]: new runtime.Tensor(
+      classifierSpec.tensorType,
+      data,
+      [1, 3, classifierSpec.inputSize, classifierSpec.inputSize],
+    ),
   };
 
   if (classifierSpec.includeBoundaryInput) {
@@ -316,7 +353,9 @@ function detectClassifierSpec(session) {
 
   return {
     inputName,
-    inputSize: hasPixelValuesInput ? (modelInputSize || 224) : (modelInputSize || CONFIG.classifierInputSize),
+    inputSize: hasPixelValuesInput
+      ? modelInputSize || 224
+      : modelInputSize || CONFIG.classifierInputSize,
     mean: hasPixelValuesInput ? CONFIG.hfMean : CONFIG.mean,
     std: hasPixelValuesInput ? CONFIG.hfStd : CONFIG.std,
     tensorType: hasPixelValuesInput ? "float32" : "float16",
@@ -333,7 +372,12 @@ function getModelInputSpatialSize(session, inputName) {
 
   const height = metadata.dims[2];
   const width = metadata.dims[3];
-  if (Number.isInteger(height) && Number.isInteger(width) && height > 0 && width > 0) {
+  if (
+    Number.isInteger(height) &&
+    Number.isInteger(width) &&
+    height > 0 &&
+    width > 0
+  ) {
     return Math.min(height, width);
   }
 
@@ -341,13 +385,22 @@ function getModelInputSpatialSize(session, inputName) {
 }
 
 function parseClassifierOutput(outputs) {
-  const logitsTensor = outputs.logits || findTensor(outputs, (name, tensor) => {
-    const dims = tensor?.dims || [];
-    return name !== "fake_prob" && dims.length === 2 && Number.isInteger(dims[dims.length - 1]) && dims[dims.length - 1] > 1;
-  });
+  const logitsTensor =
+    outputs.logits ||
+    findTensor(outputs, (name, tensor) => {
+      const dims = tensor?.dims || [];
+      return (
+        name !== "fake_prob" &&
+        dims.length === 2 &&
+        Number.isInteger(dims[dims.length - 1]) &&
+        dims[dims.length - 1] > 1
+      );
+    });
   const fakeProbTensor = outputs.fake_prob;
 
-  const logits = logitsTensor ? Array.from(readTensorAsFloat32(logitsTensor.data)) : [];
+  const logits = logitsTensor
+    ? Array.from(readTensorAsFloat32(logitsTensor.data))
+    : [];
   const pred = {
     logits,
     fakeProb: 0,
@@ -356,12 +409,19 @@ function parseClassifierOutput(outputs) {
 
   if (fakeProbTensor) {
     pred.fakeProb = readTensorAsFloat32(fakeProbTensor.data)[0];
-    pred.predLabelId = logits.length >= 2 && logits[1] > logits[0] ? 1 : pred.fakeProb >= CONFIG.fakeThreshold ? 1 : 0;
+    pred.predLabelId =
+      logits.length >= 2 && logits[1] > logits[0]
+        ? 1
+        : pred.fakeProb >= CONFIG.fakeThreshold
+          ? 1
+          : 0;
     return pred;
   }
 
   if (logits.length === 0) {
-    throw new Error("Classifier 출력에서 logits 또는 fake_prob를 찾지 못했습니다.");
+    throw new Error(
+      "Classifier 출력에서 logits 또는 fake_prob를 찾지 못했습니다.",
+    );
   }
 
   const probs = softmax(logits);
@@ -404,7 +464,9 @@ function aggregateResults(faceResults, numDetectedFaces) {
   const fakeProbabilities = faceResults.map((face) => face.fakeProb);
   const maxFakeProb = Math.max(...fakeProbabilities);
   const selectedFaceIndex = fakeProbabilities.indexOf(maxFakeProb);
-  const meanFakeProb = fakeProbabilities.reduce((sum, value) => sum + value, 0) / fakeProbabilities.length;
+  const meanFakeProb =
+    fakeProbabilities.reduce((sum, value) => sum + value, 0) /
+    fakeProbabilities.length;
   const imagePredLabel = maxFakeProb >= CONFIG.fakeThreshold ? "fake" : "real";
 
   return {
@@ -511,19 +573,39 @@ function resetSummary() {
 }
 
 function drawPreviewImage(image) {
-  const fitted = fitCanvas(previewCanvas, image.naturalWidth, image.naturalHeight);
+  const fitted = fitCanvas(
+    previewCanvas,
+    image.naturalWidth,
+    image.naturalHeight,
+  );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.drawImage(image, fitted.dx, fitted.dy, fitted.drawWidth, fitted.drawHeight);
+  previewContext.drawImage(
+    image,
+    fitted.dx,
+    fitted.dy,
+    fitted.drawWidth,
+    fitted.drawHeight,
+  );
 }
 
 function drawOverlay(image, faceResults) {
-  const fitted = fitCanvas(previewCanvas, image.naturalWidth, image.naturalHeight);
+  const fitted = fitCanvas(
+    previewCanvas,
+    image.naturalWidth,
+    image.naturalHeight,
+  );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.drawImage(image, fitted.dx, fitted.dy, fitted.drawWidth, fitted.drawHeight);
+  previewContext.drawImage(
+    image,
+    fitted.dx,
+    fitted.dy,
+    fitted.drawWidth,
+    fitted.drawHeight,
+  );
 
   previewContext.lineWidth = 3;
   previewContext.font = '13px "Avenir Next", "Segoe UI", sans-serif';
