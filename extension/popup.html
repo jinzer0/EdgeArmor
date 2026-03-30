@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EdgeArmor</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+        <section class="hero">
+          <p class="eyebrow">EdgeArmor</p>
+          <h1>Two-Stage Deepfake Scan</h1>
+          <p class="hero-copy">
+          확장 UI에서 이미지를 브라우저 내부에서 바로 분석합니다. 얼굴 탐지는 MediaPipe,
+          딥페이크 분류는 ONNX Runtime Web으로 실행하며 Chrome popup에서 결과를 바로 표시합니다.
+        </p>
+      </section>
+
+      <section class="upload-card">
+        <label class="dropzone" for="image-input">
+          <span class="dropzone-title">이미지 추가</span>
+          <span class="dropzone-copy">JPEG, PNG, WEBP 파일을 올린 뒤 분석 버튼을 누르세요.</span>
+          <span class="dropzone-meta">기본 경로: MediaPipe Face Detector + ONNX Runtime Web</span>
+        </label>
+        <input id="image-input" type="file" accept="image/*" hidden />
+        <div class="toolbar">
+          <button id="analyze-button" class="primary-button" type="button" disabled>분석 실행</button>
+          <button id="reset-button" class="secondary-button" type="button">초기화</button>
+        </div>
+        <p id="status-text" class="status-text">브라우저에서 MediaPipe와 ONNX Runtime Web 모델을 로딩해 분석합니다.</p>
+      </section>
+
+      <section class="result-grid">
+        <article class="preview-card">
+          <div class="section-head">
+            <h2>Preview</h2>
+            <span id="timing-chip" class="timing-chip">idle</span>
+          </div>
+          <canvas id="preview-canvas" class="preview-canvas" width="640" height="640"></canvas>
+        </article>
+
+        <article class="summary-card">
+          <div class="section-head">
+            <h2>Result</h2>
+          </div>
+          <div id="summary-panel" class="summary-panel empty">
+            <p class="summary-title">아직 분석 결과가 없습니다.</p>
+            <p class="summary-copy">이미지를 추가하면 얼굴별 점수와 최종 이미지 판정이 표시됩니다.</p>
+          </div>
+          <div id="face-list" class="face-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
