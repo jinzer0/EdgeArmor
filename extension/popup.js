@@ -1,9 +1,17 @@
+import {
+  cropFaceToCanvas,
+  fitCanvas,
+  resizeCanvas,
+  tensorFromCanvas,
+} from "./image_utils.js";
+import { detectFacesWithMediaPipe } from "./mediapipe_face_detector.js";
+
 const CONFIG = {
   runtimeMode: "browser",
   localServerUrl: "http://127.0.0.1:8765/analyze",
-  detectorInputSize: 640,
   classifierInputSize: 256,
   minConfidence: 0.5,
+  detectorSuppressionThreshold: 0.3,
   minFaceSize: 64,
   topK: 3,
   margin: 0.4,
@@ -15,10 +23,9 @@ const CONFIG = {
 };
 
 const HF_DEEPFAKE_CLASS_INDEX = 1;
-const CLASSIFIER_ONNX_FILE = "model.onnx";
+const CLASSIFIER_ONNX_FILE = "forensics_adapter_fp16.onnx";
 
 const MODEL_URLS = {
-  detector: chrome.runtime.getURL("models/face_detector.onnx"),
   classifier: chrome.runtime.getURL(`models/${CLASSIFIER_ONNX_FILE}`),
 };
 
@@ -36,8 +43,6 @@ let ort = null;
 const state = {
   file: null,
   image: null,
-  detectorSessionPromise: null,
-  detectorSession: null,
   classifierSessionPromise: null,
   classifierSession: null,
 };
@@ -60,7 +65,10 @@ async function handleFileChange(event) {
   state.image = await loadImageFromFile(file);
   analyzeButton.disabled = false;
   drawPreviewImage(state.image);
-  setStatus(`이미지 로드 완료: ${file.name}. 분석 버튼을 눌러 주세요.`, "ready");
+  setStatus(
+    `이미지 로드 완료: ${file.name}. 분석 버튼을 눌러 주세요.`,
+    "ready",
+  );
 }
 
 async function analyzeSelectedImage() {
@@ -112,7 +120,9 @@ async function analyzeViaLocalServer() {
     }
 
     if (payload.status !== "ok") {
-      throw new Error(payload.message || "로컬 추론 서버가 분석을 완료하지 못했습니다.");
+      throw new Error(
+        payload.message || "로컬 추론 서버가 분석을 완료하지 못했습니다.",
+      );
     }
 
     const normalizedResult = normalizeServerResult(payload);
@@ -135,10 +145,8 @@ async function analyzeInBrowser() {
   resetSummary();
   try {
     const startedAt = performance.now();
-    const detectorSession = await getDetectorSession();
-    setStatus("얼굴 탐지 중...", "running");
-
-    const detectorResult = await runDetector(detectorSession, state.image);
+    setStatus("MediaPipe 얼굴 탐지기 로딩 중...", "loading");
+    const detectorResult = await runDetector(state.image);
     if (detectorResult.selectedDetections.length === 0) {
       drawOverlay(state.image, []);
       renderNoFaceResult(detectorResult.detections.length);
@@ -151,10 +159,21 @@ async function analyzeInBrowser() {
     setStatus("얼굴별 딥페이크 판별 중...", "running");
     const faceResults = [];
 
-    for (let index = 0; index < detectorResult.selectedDetections.length; index += 1) {
+    for (
+      let index = 0;
+      index < detectorResult.selectedDetections.length;
+      index += 1
+    ) {
       const detection = detectorResult.selectedDetections[index];
-      const cropCanvas = cropFaceCanvas(state.image, detection.bbox, CONFIG.margin);
-      const classifierResult = await runClassifier(classifierSession, cropCanvas);
+      const cropCanvas = cropFaceToCanvas(
+        state.image,
+        detection.bbox,
+        CONFIG.margin,
+      );
+      const classifierResult = await runClassifier(
+        classifierSession,
+        cropCanvas,
+      );
       faceResults.push({
         faceIndex: index,
         bbox: detection.bbox.map((value) => Math.round(value)),
@@ -162,7 +181,8 @@ async function analyzeInBrowser() {
         fakeProb: classifierResult.fakeProb,
         predLabelId: classifierResult.predLabelId,
         predLabel:
-          classifierResult.predLabelId === 1 && classifierResult.fakeProb >= CONFIG.fakeThreshold
+          classifierResult.predLabelId === 1 &&
+          classifierResult.fakeProb >= CONFIG.fakeThreshold
             ? "fake"
             : "real",
         logits: classifierResult.logits,
@@ -170,7 +190,10 @@ async function analyzeInBrowser() {
       });
     }
 
-    const aggregate = aggregateResults(faceResults, detectorResult.detections.length);
+    const aggregate = aggregateResults(
+      faceResults,
+      detectorResult.detections.length,
+    );
     drawOverlay(state.image, faceResults);
     renderResult(aggregate);
     const elapsed = performance.now() - startedAt;
@@ -212,27 +235,6 @@ function normalizeServerResult(result) {
   };
 }
 
-async function getDetectorSession() {
-  if (state.detectorSession) {
-    return state.detectorSession;
-  }
-
-  if (!state.detectorSessionPromise) {
-    state.detectorSessionPromise = (async () => {
-      const runtime = await ensureOrt();
-      setStatus("Detector 모델 로딩 중...", "loading");
-      const detector = await runtime.InferenceSession.create(MODEL_URLS.detector, {
-        executionProviders: ["wasm"],
-        graphOptimizationLevel: "all",
-      });
-      state.detectorSession = detector;
-      return detector;
-    })();
-  }
-
-  return state.detectorSessionPromise;
-}
-
 async function getClassifierSession() {
   if (state.classifierSession) {
     return state.classifierSession;
@@ -251,11 +253,17 @@ async function getClassifierSession() {
       let lastError = null;
       for (const provider of executionProviders) {
         try {
-          setStatus(`Classifier 모델 로딩 중... ${provider.toUpperCase()} 사용`, "loading");
-          const classifier = await runtime.InferenceSession.create(MODEL_URLS.classifier, {
-            executionProviders: [provider],
-            graphOptimizationLevel: "all",
-          });
+          setStatus(
+            `Classifier 모델 로딩 중... ${provider.toUpperCase()} 사용`,
+            "loading",
+          );
+          const classifier = await runtime.InferenceSession.create(
+            MODEL_URLS.classifier,
+            {
+              executionProviders: [provider],
+              graphOptimizationLevel: "all",
+            },
+          );
           state.classifierSession = classifier;
           return classifier;
         } catch (error) {
@@ -289,26 +297,11 @@ async function ensureOrt() {
   return ort;
 }
 
-async function runDetector(session, image) {
-  const runtime = await ensureOrt();
-  const { canvas, scale, padX, padY } = letterboxImage(image, CONFIG.detectorInputSize);
-  const input = tensorFromCanvas(canvas, {
-    width: CONFIG.detectorInputSize,
-    height: CONFIG.detectorInputSize,
-    normalize: false,
-  });
-  const inputName = session.inputNames[0];
-  const feeds = {
-    [inputName]: new runtime.Tensor("float32", input, [1, 3, CONFIG.detectorInputSize, CONFIG.detectorInputSize]),
-  };
-  const outputMap = await session.run(feeds);
-  const output = outputMap[session.outputNames[0]];
-  const detections = parseDetectorOutput(output.data, output.dims, {
-    scale,
-    padX,
-    padY,
-    imageWidth: image.naturalWidth,
-    imageHeight: image.naturalHeight,
+async function runDetector(image) {
+  setStatus("얼굴 탐지 중...", "running");
+  const detections = await detectFacesWithMediaPipe(image, {
+    minDetectionConfidence: CONFIG.minConfidence,
+    minSuppressionThreshold: CONFIG.detectorSuppressionThreshold,
   });
   const selectedDetections = selectFaces(detections);
   return { detections, selectedDetections };
@@ -329,9 +322,15 @@ async function runClassifier(session, cropCanvas) {
     mean: classifierSpec.mean,
     std: classifierSpec.std,
   });
-  const data = classifierSpec.useFloat16 ? float32ArrayToFloat16Bits(imageInputFloat32) : imageInputFloat32;
+  const data = classifierSpec.useFloat16
+    ? float32ArrayToFloat16Bits(imageInputFloat32)
+    : imageInputFloat32;
   const feeds = {
-    [classifierSpec.inputName]: new runtime.Tensor(classifierSpec.tensorType, data, [1, 3, classifierSpec.inputSize, classifierSpec.inputSize]),
+    [classifierSpec.inputName]: new runtime.Tensor(
+      classifierSpec.tensorType,
+      data,
+      [1, 3, classifierSpec.inputSize, classifierSpec.inputSize],
+    ),
   };
 
   if (classifierSpec.includeBoundaryInput) {
@@ -354,7 +353,9 @@ function detectClassifierSpec(session) {
 
   return {
     inputName,
-    inputSize: hasPixelValuesInput ? (modelInputSize || 224) : (modelInputSize || CONFIG.classifierInputSize),
+    inputSize: hasPixelValuesInput
+      ? modelInputSize || 224
+      : modelInputSize || CONFIG.classifierInputSize,
     mean: hasPixelValuesInput ? CONFIG.hfMean : CONFIG.mean,
     std: hasPixelValuesInput ? CONFIG.hfStd : CONFIG.std,
     tensorType: hasPixelValuesInput ? "float32" : "float16",
@@ -371,7 +372,12 @@ function getModelInputSpatialSize(session, inputName) {
 
   const height = metadata.dims[2];
   const width = metadata.dims[3];
-  if (Number.isInteger(height) && Number.isInteger(width) && height > 0 && width > 0) {
+  if (
+    Number.isInteger(height) &&
+    Number.isInteger(width) &&
+    height > 0 &&
+    width > 0
+  ) {
     return Math.min(height, width);
   }
 
@@ -379,13 +385,22 @@ function getModelInputSpatialSize(session, inputName) {
 }
 
 function parseClassifierOutput(outputs) {
-  const logitsTensor = outputs.logits || findTensor(outputs, (name, tensor) => {
-    const dims = tensor?.dims || [];
-    return name !== "fake_prob" && dims.length === 2 && Number.isInteger(dims[dims.length - 1]) && dims[dims.length - 1] > 1;
-  });
+  const logitsTensor =
+    outputs.logits ||
+    findTensor(outputs, (name, tensor) => {
+      const dims = tensor?.dims || [];
+      return (
+        name !== "fake_prob" &&
+        dims.length === 2 &&
+        Number.isInteger(dims[dims.length - 1]) &&
+        dims[dims.length - 1] > 1
+      );
+    });
   const fakeProbTensor = outputs.fake_prob;
 
-  const logits = logitsTensor ? Array.from(readTensorAsFloat32(logitsTensor.data)) : [];
+  const logits = logitsTensor
+    ? Array.from(readTensorAsFloat32(logitsTensor.data))
+    : [];
   const pred = {
     logits,
     fakeProb: 0,
@@ -394,12 +409,19 @@ function parseClassifierOutput(outputs) {
 
   if (fakeProbTensor) {
     pred.fakeProb = readTensorAsFloat32(fakeProbTensor.data)[0];
-    pred.predLabelId = logits.length >= 2 && logits[1] > logits[0] ? 1 : pred.fakeProb >= CONFIG.fakeThreshold ? 1 : 0;
+    pred.predLabelId =
+      logits.length >= 2 && logits[1] > logits[0]
+        ? 1
+        : pred.fakeProb >= CONFIG.fakeThreshold
+          ? 1
+          : 0;
     return pred;
   }
 
   if (logits.length === 0) {
-    throw new Error("Classifier 출력에서 logits 또는 fake_prob를 찾지 못했습니다.");
+    throw new Error(
+      "Classifier 출력에서 logits 또는 fake_prob를 찾지 못했습니다.",
+    );
   }
 
   const probs = softmax(logits);
@@ -424,37 +446,6 @@ function softmax(values) {
   return expValues.map((value) => value / total);
 }
 
-function parseDetectorOutput(data, dims, metadata) {
-  const rows = [];
-  const detections = dims.length === 3 ? dims[1] : dims[0];
-  const columns = dims.length === 3 ? dims[2] : dims[1];
-
-  for (let index = 0; index < detections; index += 1) {
-    const offset = index * columns;
-    const confidence = data[offset + 4];
-    if (!Number.isFinite(confidence) || confidence <= 0) {
-      continue;
-    }
-
-    const scaled = [
-      (data[offset] - metadata.padX) / metadata.scale,
-      (data[offset + 1] - metadata.padY) / metadata.scale,
-      (data[offset + 2] - metadata.padX) / metadata.scale,
-      (data[offset + 3] - metadata.padY) / metadata.scale,
-    ];
-
-    const bbox = clampBbox(scaled, metadata.imageWidth, metadata.imageHeight);
-    rows.push({
-      bbox,
-      confidence,
-      classId: columns > 5 ? data[offset + 5] : 0,
-    });
-  }
-
-  rows.sort((left, right) => right.confidence - left.confidence);
-  return rows;
-}
-
 function selectFaces(detections) {
   return detections
     .filter((detection) => {
@@ -473,7 +464,9 @@ function aggregateResults(faceResults, numDetectedFaces) {
   const fakeProbabilities = faceResults.map((face) => face.fakeProb);
   const maxFakeProb = Math.max(...fakeProbabilities);
   const selectedFaceIndex = fakeProbabilities.indexOf(maxFakeProb);
-  const meanFakeProb = fakeProbabilities.reduce((sum, value) => sum + value, 0) / fakeProbabilities.length;
+  const meanFakeProb =
+    fakeProbabilities.reduce((sum, value) => sum + value, 0) /
+    fakeProbabilities.length;
   const imagePredLabel = maxFakeProb >= CONFIG.fakeThreshold ? "fake" : "real";
 
   return {
@@ -567,7 +560,7 @@ function resetUi() {
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   resetSummary();
-  setStatus("브라우저에서 ONNX로 바로 분석합니다.", "idle");
+  setStatus("브라우저에서 MediaPipe + ONNX로 바로 분석합니다.", "idle");
 }
 
 function resetSummary() {
@@ -580,19 +573,39 @@ function resetSummary() {
 }
 
 function drawPreviewImage(image) {
-  const fitted = fitCanvas(previewCanvas, image.naturalWidth, image.naturalHeight);
+  const fitted = fitCanvas(
+    previewCanvas,
+    image.naturalWidth,
+    image.naturalHeight,
+  );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.drawImage(image, fitted.dx, fitted.dy, fitted.drawWidth, fitted.drawHeight);
+  previewContext.drawImage(
+    image,
+    fitted.dx,
+    fitted.dy,
+    fitted.drawWidth,
+    fitted.drawHeight,
+  );
 }
 
 function drawOverlay(image, faceResults) {
-  const fitted = fitCanvas(previewCanvas, image.naturalWidth, image.naturalHeight);
+  const fitted = fitCanvas(
+    previewCanvas,
+    image.naturalWidth,
+    image.naturalHeight,
+  );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.drawImage(image, fitted.dx, fitted.dy, fitted.drawWidth, fitted.drawHeight);
+  previewContext.drawImage(
+    image,
+    fitted.dx,
+    fitted.dy,
+    fitted.drawWidth,
+    fitted.drawHeight,
+  );
 
   previewContext.lineWidth = 3;
   previewContext.font = '13px "Avenir Next", "Segoe UI", sans-serif';
@@ -615,84 +628,6 @@ function drawOverlay(image, faceResults) {
     previewContext.fillStyle = "#fff9f5";
     previewContext.fillText(label, drawX + 6, textY - 3);
   }
-}
-
-function fitCanvas(canvas, sourceWidth, sourceHeight) {
-  const scale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight);
-  const drawWidth = sourceWidth * scale;
-  const drawHeight = sourceHeight * scale;
-  return {
-    scale,
-    drawWidth,
-    drawHeight,
-    dx: (canvas.width - drawWidth) / 2,
-    dy: (canvas.height - drawHeight) / 2,
-  };
-}
-
-function letterboxImage(image, targetSize) {
-  const canvas = document.createElement("canvas");
-  canvas.width = targetSize;
-  canvas.height = targetSize;
-  const context = canvas.getContext("2d");
-  context.fillStyle = "rgb(114, 114, 114)";
-  context.fillRect(0, 0, targetSize, targetSize);
-
-  const scale = Math.min(targetSize / image.naturalWidth, targetSize / image.naturalHeight);
-  const drawWidth = Math.round(image.naturalWidth * scale);
-  const drawHeight = Math.round(image.naturalHeight * scale);
-  const padX = Math.floor((targetSize - drawWidth) / 2);
-  const padY = Math.floor((targetSize - drawHeight) / 2);
-
-  context.drawImage(image, padX, padY, drawWidth, drawHeight);
-  return { canvas, scale, padX, padY };
-}
-
-function cropFaceCanvas(image, bbox, margin) {
-  const [x1, y1, x2, y2] = expandBbox(bbox, margin, image.naturalWidth, image.naturalHeight);
-  const width = Math.max(1, x2 - x1);
-  const height = Math.max(1, y2 - y1);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  context.drawImage(image, x1, y1, width, height, 0, 0, width, height);
-  return canvas;
-}
-
-function resizeCanvas(sourceCanvas, width, height) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  context.drawImage(sourceCanvas, 0, 0, width, height);
-  return canvas;
-}
-
-function tensorFromCanvas(canvas, options) {
-  const context = canvas.getContext("2d");
-  const imageData = context.getImageData(0, 0, options.width, options.height).data;
-  const planeSize = options.width * options.height;
-  const output = new Float32Array(planeSize * 3);
-
-  for (let index = 0; index < planeSize; index += 1) {
-    const pixelOffset = index * 4;
-    const red = imageData[pixelOffset] / 255;
-    const green = imageData[pixelOffset + 1] / 255;
-    const blue = imageData[pixelOffset + 2] / 255;
-
-    if (options.normalize) {
-      output[index] = (red - options.mean[0]) / options.std[0];
-      output[planeSize + index] = (green - options.mean[1]) / options.std[1];
-      output[planeSize * 2 + index] = (blue - options.mean[2]) / options.std[2];
-    } else {
-      output[index] = red;
-      output[planeSize + index] = green;
-      output[planeSize * 2 + index] = blue;
-    }
-  }
-
-  return output;
 }
 
 function readTensorAsFloat32(data) {
@@ -780,32 +715,6 @@ function float16BitsToNumber(value) {
   const floatView = new Float32Array(intView.buffer);
   intView[0] = bits;
   return floatView[0];
-}
-
-function expandBbox(bbox, margin, imageWidth, imageHeight) {
-  const [x1, y1, x2, y2] = bbox;
-  const bboxWidth = x2 - x1;
-  const bboxHeight = y2 - y1;
-  const marginX = bboxWidth * margin;
-  const marginY = bboxHeight * margin;
-  return clampBbox(
-    [Math.floor(x1 - marginX), Math.floor(y1 - marginY), Math.ceil(x2 + marginX), Math.ceil(y2 + marginY)],
-    imageWidth,
-    imageHeight,
-  );
-}
-
-function clampBbox(bbox, imageWidth, imageHeight) {
-  const x1 = Math.max(0, Math.min(imageWidth, bbox[0]));
-  const y1 = Math.max(0, Math.min(imageHeight, bbox[1]));
-  const x2 = Math.max(0, Math.min(imageWidth, bbox[2]));
-  const y2 = Math.max(0, Math.min(imageHeight, bbox[3]));
-  const left = Math.max(0, Math.min(x1, x2 - 1));
-  const top = Math.max(0, Math.min(y1, y2 - 1));
-  const right = Math.min(imageWidth, Math.max(x2, left + 1));
-  const bottom = Math.min(imageHeight, Math.max(y2, top + 1));
-
-  return [left, top, right, bottom];
 }
 
 function formatProbability(value) {

@@ -15,15 +15,14 @@
 - `extension/popup.css`
   - popup 스타일
 - `scripts/prepare_chrome_extension.py`
-  - extension 폴더에 모델과 ORT Web 런타임 파일을 배치
+  - extension 폴더에 classifier ONNX, MediaPipe face detector 모델, ORT/MediaPipe 런타임 파일을 배치
 - `scripts/run_extension_inference_server.py`
   - 로컬 Python 추론 서버 실행
 
 ## 실행 방식
 
-1. ONNX 모델을 먼저 export한다.
+1. classifier ONNX 모델을 먼저 export한다.
 ```bash
-conda run -n ml3_13 python scripts/export_detector_onnx.py --out_dir artifacts/onnx
 conda run -n ml3_13 python scripts/export_forensics_adapter_onnx.py --weights_path ckpt_best.pth --config_path ForensicsAdapter/config/test.yaml --out_dir artifacts/onnx
 ```
 
@@ -39,6 +38,8 @@ npm install
 python scripts/prepare_chrome_extension.py
 ```
 
+이 스크립트는 필요한 MediaPipe face detector 모델을 공식 배포 URL에서 한 번 내려받아 `artifacts/mediapipe/`에 캐시한 뒤 extension으로 복사한다.
+
 4. 로컬 추론 서버를 실행한다.
 ```bash
 conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_path ckpt_best.pth
@@ -52,26 +53,26 @@ conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_p
 
 ## 런타임 요구사항
 
-- 기본 경로는 `http://127.0.0.1:8765/analyze` 로컬 서버 호출이다
+- 기본 경로는 브라우저 내부 MediaPipe face detector + ONNX Runtime Web classifier 조합이다
 - extension manifest에는 `127.0.0.1` 및 `localhost` host permission이 포함된다
-- 브라우저 내부 WebGPU classifier 경로는 현재 Chrome/macOS 조합에서 안정적이지 않아 기본 비활성화 대상으로 취급한다
+- 필요하면 `runtimeMode`를 `local_server`로 바꿔 기존 Python 서버 경로를 사용할 수 있다
 
 ## 현재 JS 파이프라인
 
 - popup
   - 파일 선택
-  - 로컬 서버에 원본 이미지 전송
-  - 응답 결과를 preview/summary 패널에 렌더링
-- 로컬 서버
-  - Python `DeepfakeDetectionPipeline` 실행
-  - 얼굴 탐지, crop, classifier 추론
-  - 얼굴별 결과와 최종 집계 JSON 반환
+  - MediaPipe Face Detector로 얼굴 bbox 검출
+  - margin crop 후 classifier 입력 크기로 resize
+  - ONNX Runtime Web classifier 추론
+  - 결과를 preview/summary 패널에 렌더링
+- 선택 경로
+  - 로컬 서버 모드에서는 Python `DeepfakeDetectionPipeline` 결과를 그대로 렌더링
 
 ## 제약
 
 - 원본 `artifacts/onnx/forensics_adapter.onnx`는 약 1.2GB라서 extension에서 직접 쓰지 않는다
 - extension은 `artifacts/onnx/forensics_adapter.webgpu.fp16.onnx`를 `extension/models/forensics_adapter.onnx`로 복사해 사용한다
 - `forensics_adapter.webgpu.fp16.onnx`도 약 593MB라서 현재 Chrome 146/macOS 26 조합에서는 browser WebGPU 세션 생성 시 브라우저 크래시가 발생할 수 있다
-- 그래서 기본 사용 경로는 브라우저 내부 classifier 로드가 아니라 로컬 Python 서버다
+- detector는 더 이상 ONNX를 쓰지 않고 MediaPipe task를 사용한다
 - 현재 구현은 로컬 unpacked extension 기준이다
 - Web Store 배포 전에는 모델 크기 축소, 분할, 또는 더 가벼운 classifier가 필요하다

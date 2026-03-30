@@ -12,8 +12,8 @@
           <p class="eyebrow">EdgeArmor</p>
           <h1>Two-Stage Deepfake Scan</h1>
           <p class="hero-copy">
-          확장 UI에서 이미지를 브라우저 내부에서 바로 분석합니다. 추론은 ONNX Runtime Web으로 실행되며,
-          Chrome popup에서 얼굴 탐지/딥페이크 판별 결과를 바로 표시합니다.
+          확장 UI에서 이미지를 브라우저 내부에서 바로 분석합니다. 얼굴 탐지는 MediaPipe,
+          딥페이크 분류는 ONNX Runtime Web으로 실행하며 Chrome popup에서 결과를 바로 표시합니다.
         </p>
       </section>
 
@@ -21,14 +21,14 @@
         <label class="dropzone" for="image-input">
           <span class="dropzone-title">이미지 추가</span>
           <span class="dropzone-copy">JPEG, PNG, WEBP 파일을 올린 뒤 분석 버튼을 누르세요.</span>
-          <span class="dropzone-meta">기본 경로: 브라우저 ONNX Runtime (WebGPU/WASM)</span>
+          <span class="dropzone-meta">기본 경로: MediaPipe Face Detector + ONNX Runtime Web</span>
         </label>
         <input id="image-input" type="file" accept="image/*" hidden />
         <div class="toolbar">
           <button id="analyze-button" class="primary-button" type="button" disabled>분석 실행</button>
           <button id="reset-button" class="secondary-button" type="button">초기화</button>
         </div>
-        <p id="status-text" class="status-text">브라우저 ONNX(Runtime Web)에서 모델을 로딩해 분석합니다.</p>
+        <p id="status-text" class="status-text">브라우저에서 MediaPipe와 ONNX Runtime Web 모델을 로딩해 분석합니다.</p>
       </section>
 
       <section class="result-grid">
