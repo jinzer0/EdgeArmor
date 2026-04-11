@@ -1,6 +1,5 @@
 import os
 import shutil
-import urllib.request
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -8,17 +7,10 @@ EXTENSION_DIR = os.path.join(PROJECT_ROOT, "extension")
 MODELS_DIR = os.path.join(EXTENSION_DIR, "models")
 VENDOR_DIR = os.path.join(EXTENSION_DIR, "vendor")
 ONNX_DIR = os.path.join(PROJECT_ROOT, "artifacts", "onnx")
-MEDIAPIPE_CACHE_DIR = os.path.join(PROJECT_ROOT, "artifacts", "mediapipe")
 ORT_DIST_DIR = os.path.join(PROJECT_ROOT, "node_modules", "onnxruntime-web", "dist")
-MEDIAPIPE_DIST_DIR = os.path.join(PROJECT_ROOT, "node_modules", "@mediapipe", "tasks-vision")
-MEDIAPIPE_VENDOR_DIR = os.path.join(VENDOR_DIR, "mediapipe")
-MEDIAPIPE_WASM_DIR = os.path.join(MEDIAPIPE_VENDOR_DIR, "wasm")
 CLASSIFIER_ENV_VAR = "EDGEARMOR_CLASSIFIER_ONNX"
-MEDIAPIPE_MODEL_FILENAME = "blaze_face_short_range.tflite"
-MEDIAPIPE_MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/face_detector/"
-    "blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
-)
+DETECTOR_MODEL_FILENAME = "face_detector.onnx"
+CLASSIFIER_MODEL_FILENAME = "model.onnx"
 
 
 HF_CLASSIFIER_PREFER_ORDER = [
@@ -80,17 +72,6 @@ VENDOR_FILES = [
     "ort-wasm-simd-threaded.jspi.mjs",
 ]
 
-MEDIAPIPE_VENDOR_FILES = [
-    ("vision_bundle.mjs", os.path.join(MEDIAPIPE_VENDOR_DIR, "vision_bundle.mjs")),
-    ("wasm/vision_wasm_internal.js", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_internal.js")),
-    ("wasm/vision_wasm_internal.wasm", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_internal.wasm")),
-    ("wasm/vision_wasm_module_internal.js", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_module_internal.js")),
-    ("wasm/vision_wasm_module_internal.wasm", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_module_internal.wasm")),
-    ("wasm/vision_wasm_nosimd_internal.js", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_nosimd_internal.js")),
-    ("wasm/vision_wasm_nosimd_internal.wasm", os.path.join(MEDIAPIPE_WASM_DIR, "vision_wasm_nosimd_internal.wasm")),
-]
-
-
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
@@ -113,15 +94,6 @@ def copy_file(source_path, target_path):
     shutil.copy2(source_path, target_path)
 
 
-def download_file(url, target_path):
-    ensure_dir(os.path.dirname(target_path))
-    temp_path = f"{target_path}.tmp"
-    remove_existing(temp_path)
-    urllib.request.urlretrieve(url, temp_path)
-    remove_existing(target_path)
-    os.replace(temp_path, target_path)
-
-
 def validate_inputs():
     if not os.path.isdir(EXTENSION_DIR):
         raise FileNotFoundError(f"Extension directory not found: {EXTENSION_DIR}")
@@ -131,11 +103,6 @@ def validate_inputs():
         raise FileNotFoundError(
             "onnxruntime-web dist directory not found. Run `npm install` first."
         )
-    if not os.path.isdir(MEDIAPIPE_DIST_DIR):
-        raise FileNotFoundError(
-            "@mediapipe/tasks-vision package not found. Run `npm install` first."
-        )
-
     missing_models = [
         model_file["source"]
         for model_file in get_model_files()
@@ -151,36 +118,27 @@ def validate_inputs():
 
 def prepare_models():
     ensure_dir(MODELS_DIR)
-    remove_existing(os.path.join(MODELS_DIR, "face_detector.onnx"))
+    remove_existing(os.path.join(MODELS_DIR, "blaze_face_short_range.tflite"))
+    remove_existing(os.path.join(MODELS_DIR, "forensics_adapter_fp16.onnx"))
     for model_file in get_model_files():
         source_path = os.path.join(ONNX_DIR, model_file["source"])
         target_path = os.path.join(MODELS_DIR, model_file["target"])
         link_or_copy(source_path, target_path)
 
-    prepare_mediapipe_model()
-
 
 def get_model_files():
     classifier_source = resolve_classifier_source()
-    classifier_target = "forensics_adapter_fp16.onnx"
-    if classifier_source.startswith("model_"):
-        classifier_target = "model.onnx"
 
     return [
         {
+            "source": DETECTOR_MODEL_FILENAME,
+            "target": DETECTOR_MODEL_FILENAME,
+        },
+        {
             "source": classifier_source,
-            "target": classifier_target,
+            "target": CLASSIFIER_MODEL_FILENAME,
         },
     ]
-
-
-def prepare_mediapipe_model():
-    cache_path = os.path.join(MEDIAPIPE_CACHE_DIR, MEDIAPIPE_MODEL_FILENAME)
-    target_path = os.path.join(MODELS_DIR, MEDIAPIPE_MODEL_FILENAME)
-    if not os.path.exists(cache_path):
-        print(f"Downloading MediaPipe face detector model: {MEDIAPIPE_MODEL_URL}")
-        download_file(MEDIAPIPE_MODEL_URL, cache_path)
-    link_or_copy(cache_path, target_path)
 
 
 def prepare_ort_vendor():
@@ -193,19 +151,9 @@ def prepare_ort_vendor():
         copy_file(source_path, target_path)
 
 
-def prepare_mediapipe_vendor():
-    ensure_dir(MEDIAPIPE_VENDOR_DIR)
-    ensure_dir(MEDIAPIPE_WASM_DIR)
-    for source_name, target_path in MEDIAPIPE_VENDOR_FILES:
-        source_path = os.path.join(MEDIAPIPE_DIST_DIR, source_name)
-        if not os.path.exists(source_path):
-            raise FileNotFoundError(f"Missing MediaPipe runtime file: {source_path}")
-        copy_file(source_path, target_path)
-
-
 def prepare_vendor():
     prepare_ort_vendor()
-    prepare_mediapipe_vendor()
+    shutil.rmtree(os.path.join(VENDOR_DIR, "mediapipe"), ignore_errors=True)
 
 
 def main():
