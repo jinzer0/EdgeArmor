@@ -11,6 +11,7 @@ const CONFIG = {
   runtimeMode: "browser",
   localServerUrl: "http://127.0.0.1:8765/analyze",
   classifierInputSize: 256,
+  ifBoundaryLength: 256,
   minConfidence: 0.5,
   minFaceSize: 64,
   topK: 3,
@@ -24,6 +25,7 @@ const CONFIG = {
 
 const HF_DEEPFAKE_CLASS_INDEX = 1;
 const CLASSIFIER_ONNX_FILE = "model.onnx";
+const EXTENSION_CONTRACT_URL = chrome.runtime.getURL("models/inference_contract.json");
 
 const MODEL_URLS = {
   classifier: chrome.runtime.getURL(`models/${CLASSIFIER_ONNX_FILE}`),
@@ -45,6 +47,8 @@ const state = {
   image: null,
   classifierSessionPromise: null,
   classifierSession: null,
+  contractPromise: null,
+  contractLoaded: false,
 };
 
 imageInput.addEventListener("change", handleFileChange);
@@ -54,6 +58,7 @@ analyzeButton.addEventListener("click", () => {
 resetButton.addEventListener("click", resetUi);
 
 resetUi();
+void ensureRuntimeContract();
 
 async function handleFileChange(event) {
   const [file] = event.target.files || [];
@@ -76,6 +81,8 @@ async function analyzeSelectedImage() {
     setStatus("먼저 이미지를 추가해 주세요.", "idle");
     return;
   }
+
+  await ensureRuntimeContract();
 
   if (CONFIG.runtimeMode === "local_server") {
     await analyzeViaLocalServer();
@@ -336,11 +343,11 @@ async function runClassifier(session, cropCanvas) {
   };
 
   if (classifierSpec.includeBoundaryInput) {
-    const ifBoundaryFloat32 = new Float32Array(256).fill(1.0);
+    const ifBoundaryFloat32 = new Float32Array(CONFIG.ifBoundaryLength).fill(1.0);
     feeds.if_boundary = new runtime.Tensor(
       "float16",
       float32ArrayToFloat16Bits(ifBoundaryFloat32),
-      [1, 256],
+      [1, CONFIG.ifBoundaryLength],
     );
   }
 
@@ -386,6 +393,88 @@ function getModelInputSpatialSize(session, inputName) {
   return null;
 }
 
+async function ensureRuntimeContract() {
+  if (state.contractLoaded) {
+    return CONFIG;
+  }
+
+  if (!state.contractPromise) {
+    state.contractPromise = (async () => {
+      try {
+        const response = await fetch(EXTENSION_CONTRACT_URL, { cache: "no-cache" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const contract = await response.json();
+        applyRuntimeContract(contract);
+      } catch (error) {
+        console.warn("Extension inference contract load failed, using popup defaults.", error);
+      } finally {
+        state.contractLoaded = true;
+      }
+
+      return CONFIG;
+    })();
+  }
+
+  return state.contractPromise;
+}
+
+function applyRuntimeContract(contract) {
+  const classifier = contract?.classifier || {};
+  const selection = contract?.selection || {};
+  const browser = contract?.browser || {};
+
+  if (Number.isInteger(classifier.inputSize) && classifier.inputSize > 0) {
+    CONFIG.classifierInputSize = classifier.inputSize;
+  }
+
+  if (Number.isInteger(classifier.ifBoundaryLength) && classifier.ifBoundaryLength > 0) {
+    CONFIG.ifBoundaryLength = classifier.ifBoundaryLength;
+  }
+
+  if (Array.isArray(classifier.mean) && classifier.mean.length === 3) {
+    CONFIG.mean = classifier.mean.map((value) => Number(value));
+  }
+
+  if (Array.isArray(classifier.std) && classifier.std.length === 3) {
+    CONFIG.std = classifier.std.map((value) => Number(value));
+  }
+
+  if (Array.isArray(classifier.hfMean) && classifier.hfMean.length === 3) {
+    CONFIG.hfMean = classifier.hfMean.map((value) => Number(value));
+  }
+
+  if (Array.isArray(classifier.hfStd) && classifier.hfStd.length === 3) {
+    CONFIG.hfStd = classifier.hfStd.map((value) => Number(value));
+  }
+
+  if (Number.isFinite(classifier.fakeThreshold)) {
+    CONFIG.fakeThreshold = Number(classifier.fakeThreshold);
+  }
+
+  if (Number.isFinite(selection.minConfidence)) {
+    CONFIG.minConfidence = Number(selection.minConfidence);
+  }
+
+  if (Number.isFinite(selection.minFaceSize)) {
+    CONFIG.minFaceSize = Number(selection.minFaceSize);
+  }
+
+  if (Number.isFinite(selection.topK)) {
+    CONFIG.topK = Number(selection.topK);
+  }
+
+  if (Number.isFinite(browser.margin)) {
+    CONFIG.margin = Number(browser.margin);
+  }
+
+  if (typeof classifier.modelFile === "string" && classifier.modelFile.length > 0) {
+    MODEL_URLS.classifier = chrome.runtime.getURL(`models/${classifier.modelFile}`);
+  }
+}
+
 function parseClassifierOutput(outputs) {
   const logitsTensor =
     outputs.logits ||
@@ -411,12 +500,7 @@ function parseClassifierOutput(outputs) {
 
   if (fakeProbTensor) {
     pred.fakeProb = readTensorAsFloat32(fakeProbTensor.data)[0];
-    pred.predLabelId =
-      logits.length >= 2 && logits[1] > logits[0]
-        ? 1
-        : pred.fakeProb >= CONFIG.fakeThreshold
-          ? 1
-          : 0;
+    pred.predLabelId = logits.length >= 2 ? inferPredLabelId(logits) : 0;
     return pred;
   }
 
@@ -428,8 +512,23 @@ function parseClassifierOutput(outputs) {
 
   const probs = softmax(logits);
   pred.fakeProb = probs[HF_DEEPFAKE_CLASS_INDEX] ?? probs[1] ?? probs[0];
-  pred.predLabelId = pred.fakeProb >= CONFIG.fakeThreshold ? 1 : 0;
+  pred.predLabelId = inferPredLabelId(logits);
   return pred;
+}
+
+function inferPredLabelId(logits) {
+  if (!Array.isArray(logits) || logits.length === 0) {
+    return 0;
+  }
+
+  let maxIndex = 0;
+  for (let index = 1; index < logits.length; index += 1) {
+    if (logits[index] > logits[maxIndex]) {
+      maxIndex = index;
+    }
+  }
+
+  return maxIndex;
 }
 
 function findTensor(outputs, predicate) {

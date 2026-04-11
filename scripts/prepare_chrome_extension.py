@@ -1,16 +1,27 @@
+import json
 import os
 import shutil
+import sys
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 EXTENSION_DIR = os.path.join(PROJECT_ROOT, "extension")
 MODELS_DIR = os.path.join(EXTENSION_DIR, "models")
 VENDOR_DIR = os.path.join(EXTENSION_DIR, "vendor")
 ONNX_DIR = os.path.join(PROJECT_ROOT, "artifacts", "onnx")
 ORT_DIST_DIR = os.path.join(PROJECT_ROOT, "node_modules", "onnxruntime-web", "dist")
+
+from src.pipeline.inference_contract import (
+    CLASSIFIER_MODEL_FILENAME,
+    DETECTOR_MODEL_FILENAME,
+    EXTENSION_CONTRACT_FILENAME,
+    build_extension_contract,
+)
+
 CLASSIFIER_ENV_VAR = "EDGEARMOR_CLASSIFIER_ONNX"
-DETECTOR_MODEL_FILENAME = "face_detector.onnx"
-CLASSIFIER_MODEL_FILENAME = "model.onnx"
 
 
 HF_CLASSIFIER_PREFER_ORDER = [
@@ -126,6 +137,15 @@ def prepare_models():
         link_or_copy(source_path, target_path)
 
 
+def prepare_contract():
+    ensure_dir(MODELS_DIR)
+    target_path = os.path.join(MODELS_DIR, EXTENSION_CONTRACT_FILENAME)
+    remove_existing(target_path)
+    with open(target_path, "w", encoding="utf-8") as file:
+        json.dump(build_extension_contract(), file, ensure_ascii=False, indent=2)
+        file.write("\n")
+
+
 def get_model_files():
     classifier_source = resolve_classifier_source()
 
@@ -159,6 +179,7 @@ def prepare_vendor():
 def main():
     validate_inputs()
     prepare_models()
+    prepare_contract()
     prepare_vendor()
     print("Prepared Chrome extension folder:")
     print(EXTENSION_DIR)
