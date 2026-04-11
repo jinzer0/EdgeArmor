@@ -11,9 +11,9 @@ from .inference_contract import (
     DEFAULT_PIPELINE_MARGIN,
     DEFAULT_TOP_K,
     aggregate_face_predictions,
+    build_face_prediction,
     build_failed_result,
     build_no_face_result,
-    compute_face_label,
 )
 
 
@@ -90,25 +90,17 @@ class DeepfakeDetectionPipeline:
                 failed += 1
                 continue
 
-            fake_prob = pred["fake_prob"]
-            pred_label = compute_face_label(
-                fake_prob=fake_prob,
-                pred_label_id=pred["pred_label"],
-                fake_threshold=self.fake_threshold,
-            )
-
             face_results.append(
-                {
-                    "face_index": idx,
-                    "bbox": list(map(int, detection["bbox"])),
-                    "det_confidence": float(detection["confidence"]),
-                    "fake_prob": float(fake_prob),
-                    "pred_label": pred_label,
-                    "pred_label_id": int(pred["pred_label"]),
-                    "logits": pred["logits"],
-                    "crop": crop,
-                    "crop_size": [crop.width, crop.height],
-                }
+                build_face_prediction(
+                    face_index=idx,
+                    detection=detection,
+                    fake_prob=pred["fake_prob"],
+                    pred_label_id=pred["pred_label"],
+                    logits=pred["logits"],
+                    fake_threshold=self.fake_threshold,
+                    crop=crop,
+                    include_crop=True,
+                )
             )
 
         return face_results, failed
