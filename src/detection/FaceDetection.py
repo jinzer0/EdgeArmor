@@ -181,18 +181,18 @@ class FaceDetector:
         return self.process_image(image, margin=margin)
 
 
-def detect_faces(image):
-    detector = FaceDetector()
+def detect_faces(image, *, detector=None, device=None):
+    detector = detector if detector is not None else FaceDetector(device=device)
     return detector.detect_faces(image)
 
 
-def crop_and_align_faces(image, detections, margin=0.25):
-    detector = FaceDetector(margin=margin)
+def crop_and_align_faces(image, detections, margin=0.25, *, detector=None, device=None):
+    detector = detector if detector is not None else FaceDetector(margin=margin, device=device)
     return detector.crop_and_align_faces(image, detections, margin=margin)
 
 
-def process_image(image, margin=0.25):
-    detector = FaceDetector(margin=margin)
+def process_image(image, margin=0.25, *, detector=None, device=None):
+    detector = detector if detector is not None else FaceDetector(margin=margin, device=device)
     return detector.process_image(image, margin=margin)
 
 

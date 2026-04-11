@@ -63,9 +63,9 @@ def import_face_detection(cuda_available=False, mps_available=False):
         sys.modules.pop("src.detection.FaceDetection", None)
         module = importlib.import_module("src.detection.FaceDetection")
         importlib.reload(module)
-        module._torch_module = lambda: fake_torch
-        module._hf_hub_download = fake_hub.hf_hub_download
-        module._yolo_class = lambda: FakeYOLO
+        setattr(module, "_torch_module", lambda: fake_torch)
+        setattr(module, "_hf_hub_download", fake_hub.hf_hub_download)
+        setattr(module, "_yolo_class", lambda: FakeYOLO)
         return module
 
 
@@ -96,3 +96,35 @@ class FaceDetectorDeviceTests(unittest.TestCase):
         self.assertEqual(sorted(module.FaceDetector._models_by_device.keys()), ["cpu", "cuda"])
         self.assertEqual(str(cpu_model.moved_to), "cpu")
         self.assertEqual(str(gpu_model.moved_to), "cuda")
+
+    def test_helper_functions_forward_detector_and_device(self):
+        module = import_face_detection(cuda_available=False, mps_available=False)
+        created = []
+
+        class RecordingDetector:
+            def __init__(self, margin=0.25, device=None):
+                self.margin = margin
+                self.device = device
+                created.append(self)
+
+            def detect_faces(self, image):
+                return [("detect", image, self.device)]
+
+            def crop_and_align_faces(self, image, detections, margin=None):
+                return [("crop", image, detections, margin, self.device)]
+
+            def process_image(self, image, margin=None):
+                return [("process", image, margin, self.device)]
+
+        injected = RecordingDetector(device="cuda")
+
+        with patch.object(module, "FaceDetector", RecordingDetector):
+            detect_result = module.detect_faces("img-a", device="cpu")
+            crop_result = module.crop_and_align_faces("img-b", [1], margin=0.5, device="mps")
+            process_result = module.process_image("img-c", margin=0.4, detector=injected)
+
+        self.assertEqual(detect_result, [("detect", "img-a", "cpu")])
+        self.assertEqual(crop_result, [("crop", "img-b", [1], 0.5, "mps")])
+        self.assertEqual(process_result, [("process", "img-c", 0.4, "cuda")])
+        self.assertEqual(len(created), 3)
+        self.assertEqual(created[2].margin, 0.5)
