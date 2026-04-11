@@ -4,6 +4,7 @@ from src.pipeline.inference_contract import (
     CLASSIFIER_INPUT_RESOLUTION,
     DEFAULT_FAKE_THRESHOLD,
     aggregate_face_predictions,
+    build_face_prediction,
     build_extension_contract,
     build_failed_result,
     build_no_face_result,
@@ -68,6 +69,33 @@ class InferenceContractTests(unittest.TestCase):
         self.assertEqual(compute_face_label(0.9, 1), "fake")
         self.assertEqual(compute_face_label(0.4, 1), "real")
         self.assertEqual(compute_face_label(0.9, 0), "real")
+
+    def test_build_face_prediction_preserves_shared_face_payload_shape(self):
+        class Crop:
+            width = 48
+            height = 32
+
+        crop = Crop()
+
+        result = build_face_prediction(
+            face_index=2,
+            detection={"bbox": (1, 2, 21, 22), "confidence": 0.95},
+            fake_prob=0.8,
+            pred_label_id=1,
+            logits=[0.1, 0.9],
+            crop=crop,
+            include_crop=True,
+        )
+
+        self.assertEqual(result["face_index"], 2)
+        self.assertEqual(result["bbox"], [1, 2, 21, 22])
+        self.assertEqual(result["det_confidence"], 0.95)
+        self.assertEqual(result["fake_prob"], 0.8)
+        self.assertEqual(result["pred_label"], "fake")
+        self.assertEqual(result["pred_label_id"], 1)
+        self.assertEqual(result["logits"], [0.1, 0.9])
+        self.assertEqual(result["crop_size"], [48, 32])
+        self.assertIs(result["crop"], crop)
 
 
 if __name__ == "__main__":

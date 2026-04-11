@@ -29,6 +29,44 @@ def compute_face_label(
     return "fake" if int(pred_label_id) == 1 and float(fake_prob) >= float(fake_threshold) else "real"
 
 
+def build_face_prediction(
+    *,
+    face_index,
+    detection,
+    fake_prob,
+    pred_label_id,
+    logits,
+    fake_threshold=DEFAULT_FAKE_THRESHOLD,
+    crop=None,
+    crop_size=None,
+    include_crop=False,
+):
+    if crop_size is None:
+        if crop is None:
+            raise ValueError("crop or crop_size is required")
+        crop_size = [crop.width, crop.height]
+
+    result = {
+        "face_index": int(face_index),
+        "bbox": list(map(int, detection["bbox"])),
+        "det_confidence": float(detection["confidence"]),
+        "fake_prob": float(fake_prob),
+        "pred_label": compute_face_label(
+            fake_prob=fake_prob,
+            pred_label_id=pred_label_id,
+            fake_threshold=fake_threshold,
+        ),
+        "pred_label_id": int(pred_label_id),
+        "logits": [float(value) for value in logits],
+        "crop_size": [int(crop_size[0]), int(crop_size[1])],
+    }
+
+    if include_crop:
+        result["crop"] = crop
+
+    return result
+
+
 def build_no_face_result(num_detected_faces):
     return {
         "status": "no_face",
