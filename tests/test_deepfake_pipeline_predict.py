@@ -162,6 +162,19 @@ class DeepfakePipelinePredictTests(unittest.TestCase):
         self.assertEqual(result["image_pred_label"], "fake")
         self.assertEqual(result["num_faces"], 1)
         self.assertEqual(result["debug_dir"], "outputs/custom")
+        self.assertEqual(
+            sorted(result["faces"][0].keys()),
+            [
+                "bbox",
+                "crop_size",
+                "det_confidence",
+                "face_index",
+                "fake_prob",
+                "logits",
+                "pred_label",
+                "pred_label_id",
+            ],
+        )
         self.assertEqual(result["faces"][0]["crop_size"], [40, 50])
         self.assertNotIn("crop", result["faces"][0])
         self.assertEqual(debug_calls["output_dir"], "outputs/custom")
