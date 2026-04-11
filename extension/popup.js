@@ -1,17 +1,17 @@
 import {
   cropFaceToCanvas,
   fitCanvas,
+  letterboxImageToCanvas,
   resizeCanvas,
   tensorFromCanvas,
 } from "./image_utils.js";
-import { detectFacesWithMediaPipe } from "./mediapipe_face_detector.js";
+import { detectFacesWithOnnx } from "./onnx_face_detector.js";
 
 const CONFIG = {
   runtimeMode: "browser",
   localServerUrl: "http://127.0.0.1:8765/analyze",
   classifierInputSize: 256,
   minConfidence: 0.5,
-  detectorSuppressionThreshold: 0.3,
   minFaceSize: 64,
   topK: 3,
   margin: 0.4,
@@ -23,7 +23,7 @@ const CONFIG = {
 };
 
 const HF_DEEPFAKE_CLASS_INDEX = 1;
-const CLASSIFIER_ONNX_FILE = "forensics_adapter_fp16.onnx";
+const CLASSIFIER_ONNX_FILE = "model.onnx";
 
 const MODEL_URLS = {
   classifier: chrome.runtime.getURL(`models/${CLASSIFIER_ONNX_FILE}`),
@@ -145,7 +145,7 @@ async function analyzeInBrowser() {
   resetSummary();
   try {
     const startedAt = performance.now();
-    setStatus("MediaPipe 얼굴 탐지기 로딩 중...", "loading");
+    setStatus("얼굴 탐지 모델 로딩 중...", "loading");
     const detectorResult = await runDetector(state.image);
     if (detectorResult.selectedDetections.length === 0) {
       drawOverlay(state.image, []);
@@ -299,9 +299,11 @@ async function ensureOrt() {
 
 async function runDetector(image) {
   setStatus("얼굴 탐지 중...", "running");
-  const detections = await detectFacesWithMediaPipe(image, {
-    minDetectionConfidence: CONFIG.minConfidence,
-    minSuppressionThreshold: CONFIG.detectorSuppressionThreshold,
+  const runtime = await ensureOrt();
+  const detections = await detectFacesWithOnnx(image, {
+    runtime,
+    letterboxImageToCanvas,
+    tensorFromCanvas,
   });
   const selectedDetections = selectFaces(detections);
   return { detections, selectedDetections };
@@ -447,17 +449,37 @@ function softmax(values) {
 }
 
 function selectFaces(detections) {
-  return detections
-    .filter((detection) => {
-      const width = detection.bbox[2] - detection.bbox[0];
-      const height = detection.bbox[3] - detection.bbox[1];
-      return (
-        detection.confidence >= CONFIG.minConfidence &&
-        width >= CONFIG.minFaceSize &&
-        height >= CONFIG.minFaceSize
-      );
-    })
-    .slice(0, CONFIG.topK);
+  const filtered = [];
+
+  for (const detection of detections) {
+    const confidence = Number(detection.confidence || 0);
+    if (confidence < CONFIG.minConfidence) {
+      continue;
+    }
+
+    const width = detection.bbox[2] - detection.bbox[0];
+    const height = detection.bbox[3] - detection.bbox[1];
+    if (width < CONFIG.minFaceSize || height < CONFIG.minFaceSize) {
+      continue;
+    }
+
+    filtered.push({
+      ...detection,
+      area: width * height,
+    });
+  }
+
+  filtered.sort((left, right) => right.confidence - left.confidence);
+
+  if (CONFIG.topK == null) {
+    return filtered;
+  }
+
+  if (CONFIG.topK <= 0) {
+    return [];
+  }
+
+  return filtered.slice(0, CONFIG.topK);
 }
 
 function aggregateResults(faceResults, numDetectedFaces) {
@@ -560,7 +582,7 @@ function resetUi() {
   previewContext.fillStyle = "rgba(255,250,244,1)";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   resetSummary();
-  setStatus("브라우저에서 MediaPipe + ONNX로 바로 분석합니다.", "idle");
+  setStatus("브라우저에서 ONNX detector + classifier로 바로 분석합니다.", "idle");
 }
 
 function resetSummary() {
