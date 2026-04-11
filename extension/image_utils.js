@@ -58,6 +58,36 @@ export function resizeCanvas(sourceCanvas, width, height) {
   return canvas;
 }
 
+export function letterboxImageToCanvas(image, targetSize = 640, fill = [114, 114, 114]) {
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const scale = Math.min(targetSize / width, targetSize / height);
+  const resizedWidth = Math.max(1, Math.round(width * scale));
+  const resizedHeight = Math.max(1, Math.round(height * scale));
+  const padX = Math.floor((targetSize - resizedWidth) / 2);
+  const padY = Math.floor((targetSize - resizedHeight) / 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = targetSize;
+  canvas.height = targetSize;
+
+  const context = canvas.getContext("2d");
+  context.fillStyle = `rgb(${fill[0]}, ${fill[1]}, ${fill[2]})`;
+  context.fillRect(0, 0, targetSize, targetSize);
+  context.drawImage(image, padX, padY, resizedWidth, resizedHeight);
+
+  return {
+    canvas,
+    metadata: {
+      scale,
+      padX,
+      padY,
+      origWidth: width,
+      origHeight: height,
+      inputSize: targetSize,
+    },
+  };
+}
+
 export function tensorFromCanvas(canvas, options) {
   const context = canvas.getContext("2d");
   const imageData = context.getImageData(0, 0, options.width, options.height).data;
