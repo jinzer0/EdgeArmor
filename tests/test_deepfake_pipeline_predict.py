@@ -1,8 +1,12 @@
 import importlib
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+from PIL import Image
 
 
 class DummyCrop:
@@ -163,6 +167,32 @@ class DeepfakePipelinePredictTests(unittest.TestCase):
         self.assertEqual(debug_calls["output_dir"], "outputs/custom")
         self.assertEqual(debug_calls["prefix"], "sample")
         self.assertIn("crop", debug_calls["face_results"][0])
+
+    def test_draw_debug_writes_expected_artifacts(self):
+        module = import_deepfake_pipeline(lambda crop: {"fake_prob": 0.8, "pred_label": 1, "logits": [0.1, 0.9]})
+        pipeline = module.DeepfakeDetectionPipeline(
+            config_path="config.yaml",
+            weights_path="ckpt_best.pth",
+            detector=object(),
+        )
+
+        image = Image.new("RGB", (64, 64), color="black")
+        crop = Image.new("RGB", (16, 16), color="white")
+        face_results = [
+            {
+                "bbox": [4, 5, 20, 21],
+                "pred_label": "fake",
+                "det_confidence": 0.95,
+                "fake_prob": 0.8,
+                "crop": crop,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pipeline._draw_debug(image, face_results, temp_dir, "sample")
+
+            self.assertTrue((Path(temp_dir) / "sample_faces.png").exists())
+            self.assertTrue((Path(temp_dir) / "sample_face_01.png").exists())
 
 
 if __name__ == "__main__":
