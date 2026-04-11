@@ -74,26 +74,7 @@ class DeepfakeDetectionPipeline:
             crop_output = os.path.join(output_dir, f"{prefix}_face_{idx + 1:02d}.png")
             crop.save(crop_output)
 
-    def predict(
-        self,
-        image,
-        save_debug=False,
-        debug_dir="outputs/debug",
-        debug_prefix="image",
-    ):
-        image = self.detector._load_image(image)
-        detections = self.detector.detect_faces(image)
-
-        selected = select_faces(
-            detections=detections,
-            min_confidence=self.min_confidence,
-            min_face_size=self.min_face_size,
-            top_k=self.top_k,
-        )
-
-        if len(selected) == 0:
-            return build_no_face_result(num_detected_faces=len(detections))
-
+    def _evaluate_selected_faces(self, image, selected):
         crops = self.detector.crop_and_align_faces(image, selected)
 
         face_results = []
@@ -130,17 +111,46 @@ class DeepfakeDetectionPipeline:
                 }
             )
 
+        return face_results, failed
+
+    def _summarize_face_results(self, face_results):
+        faces_summary = []
+        for face in face_results:
+            info = dict(face)
+            info.pop("crop")
+            faces_summary.append(info)
+
+        return faces_summary
+
+    def predict(
+        self,
+        image,
+        save_debug=False,
+        debug_dir="outputs/debug",
+        debug_prefix="image",
+    ):
+        image = self.detector._load_image(image)
+        detections = self.detector.detect_faces(image)
+
+        selected = select_faces(
+            detections=detections,
+            min_confidence=self.min_confidence,
+            min_face_size=self.min_face_size,
+            top_k=self.top_k,
+        )
+
+        if len(selected) == 0:
+            return build_no_face_result(num_detected_faces=len(detections))
+
+        face_results, failed = self._evaluate_selected_faces(image, selected)
+
         if len(face_results) == 0:
             return build_failed_result(
                 num_detected_faces=len(detections),
                 num_failed_faces=failed,
             )
 
-        faces_summary = []
-        for face in face_results:
-            info = dict(face)
-            info.pop("crop")
-            faces_summary.append(info)
+        faces_summary = self._summarize_face_results(face_results)
 
         if save_debug:
             self._draw_debug(image, face_results, debug_dir, debug_prefix)
