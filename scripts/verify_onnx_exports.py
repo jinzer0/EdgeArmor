@@ -1,4 +1,5 @@
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -11,7 +12,6 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 from PIL import Image
-import torch
 
 from src.detection.FaceDetection import FaceDetector
 from src.pipeline.deepfake_pipeline import DeepfakeDetectionPipeline
@@ -230,12 +230,14 @@ def build_face_crop(image, detector, min_confidence, min_face_size, top_k):
 
 def main():
     args = parse_args()
+    torch = importlib.import_module("torch")
     torch.manual_seed(args.seed)
+    verification_device = "cpu"
 
     detector_session, classifier_session = load_sessions(args.detector_onnx, args.classifier_onnx)
     image = load_image(args.image)
 
-    face_detector = FaceDetector(margin=args.margin)
+    face_detector = FaceDetector(margin=args.margin, device=verification_device)
     pytorch_detector_detections, pytorch_selected, pytorch_crops = build_face_crop(
         image=image,
         detector=face_detector,
@@ -263,7 +265,7 @@ def main():
     infer = ForensicsAdapterInfer(
         config_path=args.config_path,
         weights_path=args.weights_path,
-        device="cpu",
+        device=verification_device,
     )
 
     if not pytorch_crops:
@@ -340,7 +342,7 @@ def main():
     pytorch_pipeline = DeepfakeDetectionPipeline(
         config_path=args.config_path,
         weights_path=args.weights_path,
-        device="cpu",
+        device=verification_device,
         min_confidence=args.min_confidence,
         min_face_size=args.min_face_size,
         top_k=args.top_k,
