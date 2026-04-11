@@ -8,7 +8,6 @@
 >
 > 서버 전송 없이, 브라우저 안에서만 탐지하고 방어합니다.
 
-현재 작업 브랜치: `codex/mediapipe-face-detection`   
 **[프로젝트 구조 보러가기](#project-structure)**
 ---
 ## Highlights
@@ -24,20 +23,26 @@
 | Layer | Tech |
 | :--- | :--- |
 | Frontend | HTML5, CSS3, JavaScript (ES6+), Manifest V3 |
-| AI / ML | MediaPipe Tasks Vision, ONNX Runtime Web |
+| AI / ML | YOLOv8 ONNX Face Detector, ForensicsAdapter, ONNX Runtime Web |
 | Build | Webpack / Vite |
 ---
 ## Quick Start
 > Work In Progress - 변경될 수 있음!
 
+- Face detector ONNX export
+  - `python scripts/export_detector_onnx.py --out_dir artifacts/onnx`
 - Classifier ONNX export
   - `conda run -n ml3_13 python scripts/export_forensics_adapter_onnx.py --weights_path ckpt_best.pth --config_path ForensicsAdapter/config/test.yaml --out_dir artifacts/onnx`
 - Browser extension
   - `npm install`
   - `python scripts/prepare_chrome_extension.py`
-  - face detector는 MediaPipe 모델을 자동 다운로드해 사용
+  - prepare 스크립트는 `face_detector.onnx`, browser classifier ONNX, ORT Web 런타임을 `extension/` 폴더에 배치
   - Chrome `chrome://extensions`에서 `extension/` 폴더를 unpacked extension으로 로드
   - 상세 내용은 `docs/browser_extension.md` 참고
+
+Attribution:
+
+- face detector는 Ultralytics YOLO runtime으로 export한 `arnabdhar/YOLOv8-Face-Detection` 가중치를 사용한다.
 ---
 ## Project Structure
 > Work In Progress - 변경될 수 있음!
@@ -56,38 +61,20 @@ EdgeArmor/
 │   ├── popup.css
 │   ├── popup.js
 │   ├── image_utils.js
-│   ├── mediapipe_face_detector.js
+│   ├── onnx_face_detector.js
 │   ├── models/                         # gitignored, extension 실행 필수 산출물
-│   │   ├── blaze_face_short_range.tflite
+│   │   ├── face_detector.onnx
 │   │   ├── model.onnx
-│   │   ├── model_fp16.onnx
-│   │   ├── model_int8.onnx
-│   │   ├── model_q4f16.onnx
-│   │   ├── forensics_adapter.onnx
-│   │   └── forensics_adapter_fp16.onnx
+│   │   └── ...
 │   └── vendor/                         # gitignored, extension 실행 필수 런타임 파일
 │       ├── ort.all.min.mjs
-│       ├── ort-wasm-*.wasm
-│       └── mediapipe/
-│           ├── vision_bundle.mjs
-│           └── wasm/
-│               ├── vision_wasm_internal.js
-│               ├── vision_wasm_internal.wasm
-│               ├── vision_wasm_module_internal.js
-│               ├── vision_wasm_module_internal.wasm
-│               ├── vision_wasm_nosimd_internal.js
-│               └── vision_wasm_nosimd_internal.wasm
+│       └── ort-wasm-*.wasm
 ├── artifacts/
-│   ├── mediapipe/                      # gitignored, prepare 스크립트가 캐시
-│   │   └── blaze_face_short_range.tflite
 │   └── onnx/                           # gitignored, 원본/변환 모델 저장소
 │       ├── face_detector.onnx
 │       ├── forensics_adapter.onnx
 │       ├── forensics_adapter.webgpu.fp16.onnx
-│       ├── model_bnb4.onnx
-│       ├── model_q4.onnx
-│       ├── model_quantized.onnx
-│       └── model_uint8.onnx
+│       └── ...
 ├── scripts/
 │   ├── export_detector_onnx.py
 │   ├── export_forensics_adapter_onnx.py
@@ -123,9 +110,8 @@ EdgeArmor/
 - `ckpt_best.pth`: Python deepfake classifier 가중치
 - `dataset/weight/ViT-L-14.pt`: ForensicsAdapter 백본 로딩에 필요
 - `artifacts/onnx/*.onnx`: export, quantize, verify, extension 모델 준비의 입력
-- `artifacts/mediapipe/blaze_face_short_range.tflite`: MediaPipe detector 캐시
 - `extension/models/*`: 실제 Chrome extension이 직접 로드하는 모델 복사본
-- `extension/vendor/*`: ORT Web 및 MediaPipe runtime 번들
+- `extension/vendor/*`: ORT Web runtime 번들
 
 ---
 ## Checklist
