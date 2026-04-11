@@ -17,6 +17,15 @@ from src.detection.FaceDetection import FaceDetector
 from src.pipeline.deepfake_pipeline import DeepfakeDetectionPipeline
 from src.pipeline.face_selector import select_faces
 from src.pipeline.forensics_adapter_infer import ForensicsAdapterInfer
+from src.pipeline.inference_contract import (
+    DEFAULT_FAKE_THRESHOLD,
+    DEFAULT_MIN_CONFIDENCE,
+    DEFAULT_MIN_FACE_SIZE,
+    DEFAULT_PIPELINE_MARGIN,
+    DEFAULT_TOP_K,
+    aggregate_face_predictions,
+    compute_face_label,
+)
 from src.pipeline.preprocess import build_face_image_tensor, create_if_boundary
 
 
@@ -29,11 +38,11 @@ def parse_args():
     parser.add_argument("--classifier_onnx", default="artifacts/onnx/forensics_adapter_fp16.onnx", help="Classifier ONNX path")
     parser.add_argument("--seed", type=int, default=0, help="Seed used for deterministic model initialization")
     parser.add_argument("--classifier_atol", type=float, default=1e-3, help="Classifier parity absolute tolerance")
-    parser.add_argument("--min_confidence", type=float, default=0.5)
-    parser.add_argument("--min_face_size", type=int, default=64)
-    parser.add_argument("--top_k", type=int, default=3)
-    parser.add_argument("--margin", type=float, default=0.25)
-    parser.add_argument("--fake_threshold", type=float, default=0.5)
+    parser.add_argument("--min_confidence", type=float, default=DEFAULT_MIN_CONFIDENCE)
+    parser.add_argument("--min_face_size", type=int, default=DEFAULT_MIN_FACE_SIZE)
+    parser.add_argument("--top_k", type=int, default=DEFAULT_TOP_K)
+    parser.add_argument("--margin", type=float, default=DEFAULT_PIPELINE_MARGIN)
+    parser.add_argument("--fake_threshold", type=float, default=DEFAULT_FAKE_THRESHOLD)
     return parser.parse_args()
 
 
@@ -219,38 +228,6 @@ def build_face_crop(image, detector, min_confidence, min_face_size, top_k):
     return detections, selected, crops
 
 
-def aggregate_face_predictions(face_predictions, fake_threshold):
-    if not face_predictions:
-        return {
-            "status": "failed",
-            "image_fake_prob": None,
-            "image_pred_label": "real",
-            "num_faces": 0,
-            "faces": [],
-        }
-
-    fake_probs = [entry["fake_prob"] for entry in face_predictions]
-    max_fake_prob = max(fake_probs)
-    mean_fake_prob = sum(fake_probs) / len(fake_probs)
-    selected_face_index = int(fake_probs.index(max_fake_prob))
-    image_pred_label = "fake" if max_fake_prob >= fake_threshold else "real"
-
-    return {
-        "status": "ok",
-        "image_fake": 1 if image_pred_label == "fake" else 0,
-        "image_fake_prob": float(max_fake_prob),
-        "image_pred_label": image_pred_label,
-        "num_faces": len(face_predictions),
-        "faces": face_predictions,
-        "summary": {
-            "max_fake_prob": float(max_fake_prob),
-            "mean_fake_prob": float(mean_fake_prob),
-            "selected_face_index": selected_face_index,
-            "fake_threshold": float(fake_threshold),
-        },
-    }
-
-
 def main():
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -334,7 +311,11 @@ def main():
         logits = np.asarray(crop_outputs["logits"]).reshape(1, -1)[0]
         fake_prob = float(np.asarray(crop_outputs["fake_prob"]).reshape(-1)[0])
         pred_label_id = int(np.argmax(logits))
-        pred_label = "fake" if pred_label_id == 1 and fake_prob >= args.fake_threshold else "real"
+        pred_label = compute_face_label(
+            fake_prob=fake_prob,
+            pred_label_id=pred_label_id,
+            fake_threshold=args.fake_threshold,
+        )
         detection = onnx_selected[idx]
         onnx_face_predictions.append(
             {
@@ -349,9 +330,12 @@ def main():
             }
         )
 
-    onnx_pipeline_result = aggregate_face_predictions(onnx_face_predictions, args.fake_threshold)
-    onnx_pipeline_result["num_detected_faces"] = len(onnx_detections)
-    onnx_pipeline_result["num_failed_faces"] = 0
+    onnx_pipeline_result = aggregate_face_predictions(
+        onnx_face_predictions,
+        fake_threshold=args.fake_threshold,
+        num_detected_faces=len(onnx_detections),
+        num_failed_faces=0,
+    )
 
     pytorch_pipeline = DeepfakeDetectionPipeline(
         config_path=args.config_path,
