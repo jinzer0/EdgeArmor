@@ -2,6 +2,12 @@ import torch
 from PIL import Image
 from torchvision import transforms as T
 
+from .inference_contract import (
+    CLASSIFIER_INPUT_RESOLUTION,
+    CLASSIFIER_MEAN,
+    CLASSIFIER_STD,
+)
+
 
 def _to_rgb_image(face_image):
     if isinstance(face_image, Image.Image):
@@ -10,16 +16,16 @@ def _to_rgb_image(face_image):
     raise ValueError("face_image must be a PIL.Image.Image")
 
 
-def create_if_boundary(batch_size=1, resolution=256, value=1.0, device="cpu"):
+def create_if_boundary(batch_size=1, resolution=CLASSIFIER_INPUT_RESOLUTION, value=1.0, device="cpu"):
     patch_num = (resolution // 16) ** 2
     return torch.full((batch_size, patch_num), float(value), dtype=torch.float32, device=device)
 
 
-def build_face_image_tensor(face_image, resolution=256, mean=None, std=None, device="cpu"):
+def build_face_image_tensor(face_image, resolution=CLASSIFIER_INPUT_RESOLUTION, mean=None, std=None, device="cpu"):
     if mean is None:
-        mean = [0.48145466, 0.4578275, 0.40821073]
+        mean = list(CLASSIFIER_MEAN)
     if std is None:
-        std = [0.26862954, 0.26130258, 0.27577711]
+        std = list(CLASSIFIER_STD)
 
     image = _to_rgb_image(face_image).resize((resolution, resolution))
 
@@ -33,7 +39,7 @@ def build_face_image_tensor(face_image, resolution=256, mean=None, std=None, dev
     return preprocess(image).unsqueeze(0).to(device)
 
 
-def build_face_data_dict(face_image, resolution=256, mean=None, std=None, device="cpu", label=0, if_boundary_value=1.0):
+def build_face_data_dict(face_image, resolution=CLASSIFIER_INPUT_RESOLUTION, mean=None, std=None, device="cpu", label=0, if_boundary_value=1.0):
     image_tensor = build_face_image_tensor(
         face_image,
         resolution=resolution,

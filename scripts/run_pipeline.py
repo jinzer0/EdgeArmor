@@ -7,6 +7,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.pipeline.deepfake_pipeline import DeepfakeDetectionPipeline
+from src.pipeline.inference_contract import (
+    DEFAULT_FAKE_THRESHOLD,
+    DEFAULT_MIN_CONFIDENCE,
+    DEFAULT_MIN_FACE_SIZE,
+    DEFAULT_PIPELINE_MARGIN,
+    DEFAULT_TOP_K,
+)
 
 
 def parse_args():
@@ -15,11 +22,11 @@ def parse_args():
     parser.add_argument("--weights_path", required=True, help="Path to DS checkpoint")
     parser.add_argument("--config_path", default=None, help="Path to config yaml (optional)")
     parser.add_argument("--device", default=None, help="cuda:0, cuda, mps, or cpu")
-    parser.add_argument("--min_confidence", type=float, default=0.5)
-    parser.add_argument("--min_face_size", type=int, default=64)
-    parser.add_argument("--top_k", type=int, default=3)
-    parser.add_argument("--margin", type=float, default=0.25)
-    parser.add_argument("--fake_threshold", type=float, default=0.5)
+    parser.add_argument("--min_confidence", type=float, default=DEFAULT_MIN_CONFIDENCE)
+    parser.add_argument("--min_face_size", type=int, default=DEFAULT_MIN_FACE_SIZE)
+    parser.add_argument("--top_k", type=int, default=DEFAULT_TOP_K)
+    parser.add_argument("--margin", type=float, default=DEFAULT_PIPELINE_MARGIN)
+    parser.add_argument("--fake_threshold", type=float, default=DEFAULT_FAKE_THRESHOLD)
     parser.add_argument("--save_debug", action="store_true")
     parser.add_argument("--debug_dir", default="outputs/debug")
     parser.add_argument("--debug_prefix", default="sample")
