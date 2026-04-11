@@ -36,7 +36,7 @@
 - Browser extension
   - `npm install`
   - `python scripts/prepare_chrome_extension.py`
-  - prepare 스크립트는 `face_detector.onnx`, browser classifier ONNX, ORT Web 런타임을 `extension/` 폴더에 배치
+  - prepare 스크립트는 `face_detector.onnx`, browser classifier ONNX, `inference_contract.json`, ORT Web 런타임을 `extension/` 폴더에 배치
   - Chrome `chrome://extensions`에서 `extension/` 폴더를 unpacked extension으로 로드
   - 상세 내용은 `docs/browser_extension.md` 참고
 
@@ -64,6 +64,7 @@ EdgeArmor/
 │   ├── onnx_face_detector.js
 │   ├── models/                         # gitignored, extension 실행 필수 산출물
 │   │   ├── face_detector.onnx
+│   │   ├── inference_contract.json
 │   │   ├── model.onnx
 │   │   └── ...
 │   └── vendor/                         # gitignored, extension 실행 필수 런타임 파일
