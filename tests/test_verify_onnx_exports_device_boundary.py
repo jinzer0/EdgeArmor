@@ -1,5 +1,6 @@
 import importlib
 import io
+import json
 import sys
 import types
 import unittest
@@ -104,11 +105,35 @@ def import_verify_module(record):
     setattr(infer_module, "ForensicsAdapterInfer", FakeInfer)
 
     contract_module = types.ModuleType("src.pipeline.inference_contract")
+
+    def fake_build_face_prediction(**kwargs):
+        result = {
+            "face_index": int(kwargs["face_index"]),
+            "bbox": list(map(int, kwargs["detection"]["bbox"])),
+            "det_confidence": float(kwargs["detection"]["confidence"]),
+            "fake_prob": float(kwargs["fake_prob"]),
+            "pred_label": (
+                "fake"
+                if int(kwargs["pred_label_id"]) == 1
+                and float(kwargs["fake_prob"]) >= float(kwargs.get("fake_threshold", 0.5))
+                else "real"
+            ),
+            "pred_label_id": int(kwargs["pred_label_id"]),
+            "logits": [float(value) for value in kwargs["logits"]],
+            "crop_size": [kwargs["crop"].width, kwargs["crop"].height],
+        }
+
+        if kwargs.get("include_crop"):
+            result["crop"] = kwargs["crop"]
+
+        return result
+
     setattr(contract_module, "DEFAULT_FAKE_THRESHOLD", 0.5)
     setattr(contract_module, "DEFAULT_MIN_CONFIDENCE", 0.5)
     setattr(contract_module, "DEFAULT_MIN_FACE_SIZE", 64)
     setattr(contract_module, "DEFAULT_PIPELINE_MARGIN", 0.25)
     setattr(contract_module, "DEFAULT_TOP_K", 3)
+    setattr(contract_module, "build_face_prediction", fake_build_face_prediction)
     setattr(
         contract_module,
         "aggregate_face_predictions",
@@ -186,8 +211,23 @@ class VerifyOnnxExportsDeviceBoundaryTests(unittest.TestCase):
             "xray_pred": np.zeros((1, 1, 256, 256), dtype=np.float32),
         })
 
-        with redirect_stdout(io.StringIO()):
+        with redirect_stdout(io.StringIO()) as stdout:
             module.main()
+
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(
+            sorted(report["end_to_end"]["onnx"]["faces"][0].keys()),
+            [
+                "bbox",
+                "crop_size",
+                "det_confidence",
+                "face_index",
+                "fake_prob",
+                "logits",
+                "pred_label",
+                "pred_label_id",
+            ],
+        )
 
         self.assertEqual(record["face_detector_device"], "cpu")
         self.assertEqual(record["infer_device"], "cpu")

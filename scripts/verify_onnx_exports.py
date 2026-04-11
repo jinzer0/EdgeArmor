@@ -24,7 +24,7 @@ from src.pipeline.inference_contract import (
     DEFAULT_PIPELINE_MARGIN,
     DEFAULT_TOP_K,
     aggregate_face_predictions,
-    compute_face_label,
+    build_face_prediction,
 )
 from src.pipeline.preprocess import build_face_image_tensor, create_if_boundary
 
@@ -313,23 +313,17 @@ def main():
         logits = np.asarray(crop_outputs["logits"]).reshape(1, -1)[0]
         fake_prob = float(np.asarray(crop_outputs["fake_prob"]).reshape(-1)[0])
         pred_label_id = int(np.argmax(logits))
-        pred_label = compute_face_label(
-            fake_prob=fake_prob,
-            pred_label_id=pred_label_id,
-            fake_threshold=args.fake_threshold,
-        )
         detection = onnx_selected[idx]
         onnx_face_predictions.append(
-            {
-                "face_index": idx,
-                "bbox": list(map(int, detection["bbox"])),
-                "det_confidence": float(detection["confidence"]),
-                "fake_prob": fake_prob,
-                "pred_label": pred_label,
-                "pred_label_id": pred_label_id,
-                "logits": [float(value) for value in logits.tolist()],
-                "crop_size": [crop.width, crop.height],
-            }
+            build_face_prediction(
+                face_index=idx,
+                detection=detection,
+                fake_prob=fake_prob,
+                pred_label_id=pred_label_id,
+                logits=logits.tolist(),
+                fake_threshold=args.fake_threshold,
+                crop=crop,
+            )
         )
 
     onnx_pipeline_result = aggregate_face_predictions(
