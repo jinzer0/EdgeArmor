@@ -8,48 +8,44 @@
   </head>
   <body>
     <main class="app-shell">
-        <section class="hero">
-          <p class="eyebrow">EdgeArmor</p>
-          <h1>Two-Stage Deepfake Scan</h1>
-          <p class="hero-copy">
-          확장 UI에서 이미지를 브라우저 내부에서 바로 분석합니다. 얼굴 탐지와
-          딥페이크 분류 모두 ONNX Runtime Web 기반으로 실행하며 Chrome popup에서 결과를 바로 표시합니다.
-        </p>
-      </section>
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-name">EdgeArmor</span>
+          <span class="brand-badge">Forensic Scan</span>
+        </div>
+        <span id="timing-chip" class="timing-chip">idle</span>
+      </header>
 
-      <section class="upload-card">
-        <label class="dropzone" for="image-input">
-          <span class="dropzone-title">이미지 추가</span>
-          <span class="dropzone-copy">JPEG, PNG, WEBP 파일을 올린 뒤 분석 버튼을 누르세요.</span>
-          <span class="dropzone-meta">기본 경로: YOLOv8 Face Detector ONNX + ONNX Runtime Web</span>
+      <section class="control-panel">
+        <label class="dropzone" for="image-input" tabindex="0">
+          <div class="dropzone-content">
+            <span class="dropzone-title">이미지 선택</span>
+            <span class="dropzone-meta">JPEG, PNG, WEBP</span>
+          </div>
         </label>
         <input id="image-input" type="file" accept="image/*" hidden />
-        <div class="toolbar">
-          <button id="analyze-button" class="primary-button" type="button" disabled>분석 실행</button>
-          <button id="reset-button" class="secondary-button" type="button">초기화</button>
+        
+        <div class="actions">
+          <button id="analyze-button" class="btn-primary" type="button" disabled>분석 실행</button>
+          <button id="reset-button" class="btn-secondary" type="button">초기화</button>
         </div>
-        <p id="status-text" class="status-text">브라우저에서 detector/classifier ONNX 모델을 로딩해 분석합니다.</p>
+        <div class="status-bar">
+          <p id="status-text" class="status-text">브라우저에서 ONNX detector + classifier로 바로 분석합니다.</p>
+        </div>
       </section>
 
-      <section class="result-grid">
-        <article class="preview-card">
-          <div class="section-head">
-            <h2>Preview</h2>
-            <span id="timing-chip" class="timing-chip">idle</span>
-          </div>
+      <section class="analysis-grid">
+        <div class="preview-container">
           <canvas id="preview-canvas" class="preview-canvas" width="640" height="640"></canvas>
-        </article>
+        </div>
 
-        <article class="summary-card">
-          <div class="section-head">
-            <h2>Result</h2>
-          </div>
+        <div class="results-container">
           <div id="summary-panel" class="summary-panel empty">
             <p class="summary-title">아직 분석 결과가 없습니다.</p>
             <p class="summary-copy">이미지를 추가하면 얼굴별 점수와 최종 이미지 판정이 표시됩니다.</p>
           </div>
           <div id="face-list" class="face-list"></div>
-        </article>
+        </div>
       </section>
     </main>
 

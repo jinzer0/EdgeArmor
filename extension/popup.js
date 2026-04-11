@@ -678,7 +678,7 @@ function resetUi() {
   analyzeButton.disabled = true;
   timingChip.textContent = "idle";
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.fillStyle = "rgba(255,250,244,1)";
+  previewContext.fillStyle = "#F4F4F3";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   resetSummary();
   setStatus("브라우저에서 ONNX detector + classifier로 바로 분석합니다.", "idle");
@@ -700,7 +700,7 @@ function drawPreviewImage(image) {
     image.naturalHeight,
   );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.fillStyle = "rgba(255,250,244,1)";
+  previewContext.fillStyle = "#F4F4F3";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.drawImage(
     image,
@@ -718,7 +718,7 @@ function drawOverlay(image, faceResults) {
     image.naturalHeight,
   );
   previewContext.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-  previewContext.fillStyle = "rgba(255,250,244,1)";
+  previewContext.fillStyle = "#F4F4F3";
   previewContext.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
   previewContext.drawImage(
     image,
@@ -729,11 +729,11 @@ function drawOverlay(image, faceResults) {
   );
 
   previewContext.lineWidth = 3;
-  previewContext.font = '13px "Avenir Next", "Segoe UI", sans-serif';
+  previewContext.font = '11px "Geist Mono", "SF Mono", monospace';
 
   for (const face of faceResults) {
     const [x1, y1, x2, y2] = face.bbox;
-    const color = face.predLabel === "fake" ? "#b53d34" : "#0e7b58";
+    const color = face.predLabel === "fake" ? "#9F2F2D" : "#346538";
     const drawX = fitted.dx + x1 * fitted.scale;
     const drawY = fitted.dy + y1 * fitted.scale;
     const drawWidth = (x2 - x1) * fitted.scale;
@@ -746,7 +746,7 @@ function drawOverlay(image, faceResults) {
     const textWidth = previewContext.measureText(label).width + 12;
     const textY = Math.max(18, drawY - 10);
     previewContext.fillRect(drawX, textY - 16, textWidth, 18);
-    previewContext.fillStyle = "#fff9f5";
+    previewContext.fillStyle = "#FFFFFF";
     previewContext.fillText(label, drawX + 6, textY - 3);
   }
 }

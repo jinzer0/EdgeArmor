@@ -54,3 +54,5 @@ target/
 /artifacts/onnx/model_q4.onnx
 /artifacts/onnx/model_quantized.onnx
 /artifacts/onnx/model_uint8.onnx
+
+.playwright-mcp/
