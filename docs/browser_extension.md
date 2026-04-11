@@ -18,7 +18,7 @@
 - `extension/popup.css`
   - popup 스타일
 - `scripts/prepare_chrome_extension.py`
-  - extension 폴더에 detector ONNX, browser classifier ONNX, ORT 런타임 파일을 배치
+  - extension 폴더에 detector ONNX, browser classifier ONNX, `inference_contract.json`, ORT 런타임 파일을 배치
 - `scripts/run_extension_inference_server.py`
   - 선택적인 로컬 Python 추론 서버 실행
 
@@ -46,7 +46,7 @@ npm install
 python scripts/prepare_chrome_extension.py
 ```
 
-이 스크립트는 detector ONNX를 `extension/models/face_detector.onnx`로, 선택된 browser classifier ONNX를 `extension/models/model.onnx`로, ORT Web 런타임 파일을 `extension/vendor/`로 복사 또는 링크한다.
+이 스크립트는 detector ONNX를 `extension/models/face_detector.onnx`로, 선택된 browser classifier ONNX를 `extension/models/model.onnx`로, shared runtime contract를 `extension/models/inference_contract.json`으로, ORT Web 런타임 파일을 `extension/vendor/`로 복사 또는 링크한다.
 
 5. Chrome에서 `chrome://extensions`를 열고 `개발자 모드`를 켠다.
 
@@ -74,6 +74,7 @@ conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_p
 - popup
   - 파일 선택
   - `face_detector.onnx` 로 얼굴 bbox 검출
+  - `inference_contract.json` 로 classifier/selection/browser 기본값 동기화
   - margin crop 후 classifier 입력 크기로 resize
   - ONNX Runtime Web classifier 추론
   - 결과를 preview/summary 패널에 렌더링

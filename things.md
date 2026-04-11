@@ -235,10 +235,14 @@ class DeepfakeDetectionPipeline:
 
 ```python
 {
+    "face_index": 0,
     "bbox": [x1, y1, x2, y2],
     "det_confidence": 0.91,
     "fake_prob": 0.82,
     "pred_label": "fake",
+    "pred_label_id": 1,
+    "logits": [real_logit, fake_logit],
+    "crop_size": [w, h],
 }
 ```
 

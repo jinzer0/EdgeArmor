@@ -3,6 +3,11 @@ import yaml
 import torch
 from ForensicsAdapter.model.ds import DS
 
+from .inference_contract import (
+    CLASSIFIER_INPUT_RESOLUTION,
+    CLASSIFIER_MEAN,
+    CLASSIFIER_STD,
+)
 from .preprocess import build_face_data_dict
 
 
@@ -14,9 +19,9 @@ DEFAULT_INFERENCE_CONFIG = {
     "mlp_dim": 256,
     "mlp_out_dim": 128,
     "head_num": 16,
-    "resolution": 256,
-    "mean": [0.48145466, 0.4578275, 0.40821073],
-    "std": [0.26862954, 0.26130258, 0.27577711],
+    "resolution": CLASSIFIER_INPUT_RESOLUTION,
+    "mean": list(CLASSIFIER_MEAN),
+    "std": list(CLASSIFIER_STD),
     "device": None,
 }
 
