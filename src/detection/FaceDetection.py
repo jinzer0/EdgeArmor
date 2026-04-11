@@ -1,31 +1,70 @@
+import importlib
 import math
 import os
 
-from huggingface_hub import hf_hub_download
 from PIL import Image
-import torch
-from ultralytics import YOLO
 
 
 MODEL_REPO_ID = "arnabdhar/YOLOv8-Face-Detection"
 MODEL_FILENAME = "model.pt"
 
-_DEVICE = torch.device("mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+
+def _torch_module():
+    return importlib.import_module("torch")
+
+
+def _hf_hub_download(repo_id, filename):
+    huggingface_hub = importlib.import_module("huggingface_hub")
+    return huggingface_hub.hf_hub_download(repo_id=repo_id, filename=filename)
+
+
+def _yolo_class():
+    ultralytics = importlib.import_module("ultralytics")
+    return ultralytics.YOLO
+
+
+def resolve_detector_device(requested_device=None):
+    torch = _torch_module()
+    if requested_device is not None:
+        try:
+            device = torch.device(requested_device)
+        except Exception:
+            device = None
+        else:
+            if device.type == "mps" and torch.backends.mps.is_available():
+                return device
+            if device.type == "cuda" and torch.cuda.is_available():
+                return device
+            if device.type == "cpu":
+                return torch.device("cpu")
+
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
 class FaceDetector:
-    _model = None
+    _models_by_device = {}
 
-    def __init__(self, margin=0.25):
+    def __init__(self, margin=0.25, device=None):
         self.margin = margin
+        self.device = resolve_detector_device(device)
 
     @classmethod
-    def _get_model(cls):
-        if cls._model is None:
-            model_path = hf_hub_download(repo_id=MODEL_REPO_ID, filename=MODEL_FILENAME)
-            cls._model = YOLO(model_path).to(_DEVICE)
+    def _get_model_for_device(cls, device):
+        torch = _torch_module()
+        device = resolve_detector_device(device)
+        cache_key = str(device)
+        if cache_key not in cls._models_by_device:
+            model_path = _hf_hub_download(repo_id=MODEL_REPO_ID, filename=MODEL_FILENAME)
+            cls._models_by_device[cache_key] = _yolo_class()(model_path).to(torch.device(cache_key))
 
-        return cls._model
+        return cls._models_by_device[cache_key]
+
+    def _get_model(self):
+        return self.__class__._get_model_for_device(self.device)
 
     def _load_image(self, image):
         if isinstance(image, Image.Image):
