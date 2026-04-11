@@ -30,24 +30,24 @@ class DeepfakeDetectionPipeline:
         margin=DEFAULT_PIPELINE_MARGIN,
         fake_threshold=DEFAULT_FAKE_THRESHOLD,
     ):
-        self.detector = detector if detector is not None else FaceDetector(margin=margin)
         self.fake_detector = ForensicsAdapterInfer(
             config_path=config_path,
             weights_path=weights_path,
             device=device,
         )
-
-        try:
-            import src.detection.FaceDetection as detector_module
-
-            detector_module._DEVICE = self.fake_detector.device
-        except Exception:
-            pass
+        self.device = self.fake_detector.device
+        self.detector = self._build_detector(detector=detector, margin=margin)
 
         self.min_confidence = min_confidence
         self.min_face_size = min_face_size
         self.top_k = top_k
         self.fake_threshold = fake_threshold
+
+    def _build_detector(self, detector, margin):
+        if detector is not None:
+            return detector
+
+        return FaceDetector(margin=margin, device=self.device)
 
     def _draw_debug(self, image, face_results, output_dir, prefix):
         os.makedirs(output_dir, exist_ok=True)
