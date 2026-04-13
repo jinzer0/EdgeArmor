@@ -3,6 +3,8 @@ import os
 import shutil
 import sys
 
+import onnx
+
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if PROJECT_ROOT not in sys.path:
@@ -34,12 +36,29 @@ HF_CLASSIFIER_PREFER_ORDER = [
     "model_bnb4.onnx",
 ]
 
+LEGACY_CLASSIFIER_PREFER_ORDER = [
+    "forensics_adapter.onnx",
+    "forensics_adapter.webgpu.fp16.onnx",
+    "forensics_adapter_fp16.onnx",
+]
+
+
+def is_valid_onnx_file(model_path):
+    try:
+        model = onnx.load(model_path)
+        onnx.checker.check_model(model)
+    except Exception:
+        return False
+    return True
+
 def resolve_classifier_source():
     forced = os.environ.get(CLASSIFIER_ENV_VAR)
     if forced:
         forced_path = os.path.join(ONNX_DIR, forced)
         if not os.path.exists(forced_path):
             raise FileNotFoundError(f"Forced classifier ONNX not found: {forced}")
+        if not is_valid_onnx_file(forced_path):
+            raise ValueError(f"Forced classifier ONNX is invalid: {forced}")
         return forced
 
     hf_candidates = [
@@ -50,26 +69,29 @@ def resolve_classifier_source():
     if hf_candidates:
         for filename in HF_CLASSIFIER_PREFER_ORDER:
             candidate = os.path.join(ONNX_DIR, filename)
-            if os.path.exists(candidate):
+            if os.path.exists(candidate) and is_valid_onnx_file(candidate):
                 return filename
 
-        smallest_model = min(
-            hf_candidates,
-            key=lambda filename: os.path.getsize(os.path.join(ONNX_DIR, filename)),
-        )
-        return smallest_model
+        valid_hf_candidates = [
+            filename
+            for filename in hf_candidates
+            if is_valid_onnx_file(os.path.join(ONNX_DIR, filename))
+        ]
+        if valid_hf_candidates:
+            smallest_model = min(
+                valid_hf_candidates,
+                key=lambda filename: os.path.getsize(os.path.join(ONNX_DIR, filename)),
+            )
+            return smallest_model
 
-    legacy_source = "forensics_adapter.webgpu.fp16.onnx"
-    legacy_path = os.path.join(ONNX_DIR, legacy_source)
-    if os.path.exists(legacy_path):
-        return legacy_source
-
-    for filename in ["forensics_adapter.webgpu.fp16.onnx", "forensics_adapter_fp16.onnx"]:
+    for filename in LEGACY_CLASSIFIER_PREFER_ORDER:
         candidate = os.path.join(ONNX_DIR, filename)
-        if os.path.exists(candidate):
+        if os.path.exists(candidate) and is_valid_onnx_file(candidate):
             return filename
 
-    raise FileNotFoundError("No suitable classifier ONNX found in artifacts/onnx. Download model_*.onnx or keep forensics_adapter.webgpu.fp16.onnx.")
+    raise FileNotFoundError(
+        "No suitable valid classifier ONNX found in artifacts/onnx. Provide a valid model_*.onnx or keep a valid legacy classifier artifact."
+    )
 
 VENDOR_FILES = [
     "ort.all.min.mjs",
