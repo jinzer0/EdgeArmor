@@ -34,7 +34,7 @@ python scripts/export_detector_onnx.py --out_dir artifacts/onnx
 conda run -n ml3_13 python scripts/export_forensics_adapter_onnx.py --weights_path ckpt_best.pth --config_path ForensicsAdapter/config/test.yaml --out_dir artifacts/onnx
 ```
 
-classifier export가 끝나면 브라우저용 `artifacts/onnx/forensics_adapter.webgpu.fp16.onnx`도 함께 생성된다.
+classifier export가 끝나면 legacy classifier artifact와 browser-targeted variant가 함께 생성될 수 있다. 다만 extension packaging은 특정 fp16 파일명을 전제로 하지 않고, 사용 가능한 classifier 후보 중에서 **유효한 ONNX만 검사한 뒤** `extension/models/model.onnx`로 복사한다.
 
 3. ORT Web 의존성을 설치한다.
 ```bash
@@ -46,7 +46,7 @@ npm install
 python scripts/prepare_chrome_extension.py
 ```
 
-이 스크립트는 detector ONNX를 `extension/models/face_detector.onnx`로, 선택된 browser classifier ONNX를 `extension/models/model.onnx`로, shared runtime contract를 `extension/models/inference_contract.json`으로, ORT Web 런타임 파일을 `extension/vendor/`로 복사 또는 링크한다.
+이 스크립트는 detector ONNX를 `extension/models/face_detector.onnx`로, 검증된 classifier ONNX를 `extension/models/model.onnx`로, shared runtime contract를 `extension/models/inference_contract.json`으로, ORT Web 런타임 파일을 `extension/vendor/`로 복사 또는 링크한다. invalid ONNX artifact는 packaging 단계에서 제외된다.
 
 5. Chrome에서 `chrome://extensions`를 열고 `개발자 모드`를 켠다.
 
@@ -76,7 +76,7 @@ conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_p
   - `face_detector.onnx` 로 얼굴 bbox 검출
   - `inference_contract.json` 로 classifier/selection/browser 기본값 동기화
   - margin crop 후 classifier 입력 크기로 resize
-  - ONNX Runtime Web classifier 추론
+  - ONNX Runtime Web classifier 추론 (`image` / `if_boundary` dtype은 loaded model metadata를 기준으로 결정)
   - 결과를 preview/summary 패널에 렌더링
 - 선택 경로
   - 로컬 서버 모드에서는 Python `DeepfakeDetectionPipeline` 결과를 그대로 렌더링
@@ -84,8 +84,9 @@ conda run -n ml3_13 python scripts/run_extension_inference_server.py --weights_p
 ## 제약
 
 - 원본 `artifacts/onnx/forensics_adapter.onnx`는 약 1.2GB라서 extension에서 직접 쓰지 않는다
-- extension은 선택된 browser classifier ONNX를 `extension/models/model.onnx`로 복사해 사용한다
-- `forensics_adapter.webgpu.fp16.onnx`도 약 593MB라서 현재 Chrome 146/macOS 26 조합에서는 browser WebGPU 세션 생성 시 브라우저 크래시가 발생할 수 있다
+- extension은 선택된 valid classifier ONNX를 `extension/models/model.onnx`로 복사해 사용한다
+- current repo에서는 invalid browser fp16 artifact가 있더라도 `scripts/prepare_chrome_extension.py`가 이를 건너뛰고 valid fallback classifier를 선택한다
+- `forensics_adapter.webgpu.fp16.onnx`는 legacy browser-targeted variant로 남아 있을 수 있지만, runtime 기본 전제는 아니다
 - detector는 `extension/models/face_detector.onnx`를 ORT Web으로 실행한다
 - 현재 구현은 로컬 unpacked extension 기준이다
 - Web Store 배포 전에는 모델 크기 축소, 분할, 또는 더 가벼운 classifier가 필요하다

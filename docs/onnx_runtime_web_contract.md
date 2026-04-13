@@ -89,12 +89,14 @@
     - `if_boundary` 없음
   - legacy ForensicsAdapter classifier (`image` 입력)
     - 입력 이름: `image`
-    - dtype: 현재 browser path에서는 `float16`
+    - dtype: loaded model metadata 기준 (`tensor(float16)`면 `float16`, 그 외에는 `float32`)
     - shape: `[1, 3, 256, 256]`
     - `if_boundary`
-      - dtype: `float16`
+      - dtype: loaded model metadata 기준 (`tensor(float16)`면 `float16`, 그 외에는 `float32`)
       - shape: `[1, ifBoundaryLength]` (`inference_contract.json` 기준, 현재 `256`)
       - 값: 모두 `1.0`
+
+- 현재 repo에서 packaging이 valid fallback으로 선택하는 `forensics_adapter.onnx`는 `image` / `if_boundary` 둘 다 `tensor(float)` 입력을 가진다.
 
 ### JS 전처리
 
@@ -105,7 +107,7 @@
   - mean: `[0.48145466, 0.4578275, 0.40821073]`
   - std: `[0.26862954, 0.26130258, 0.27577711]`
 - CHW 순서 `Float32Array`로 변환
-- `if_boundary = ones([1, 256])` 생성
+- `if_boundary = ones([1, 256])` 생성 (dtype은 loaded model metadata를 따름)
 
 ### Output
 
@@ -141,5 +143,5 @@ python scripts/export_forensics_adapter_onnx.py --weights_path /path/to/ckpt_bes
 
 - parity verification
 ```bash
-python scripts/verify_onnx_exports.py --image /path/to/image --weights_path /path/to/ckpt_best.pth --detector_onnx artifacts/onnx/face_detector.onnx --classifier_onnx artifacts/onnx/forensics_adapter_fp16.onnx
+python scripts/verify_onnx_exports.py --image /path/to/image --weights_path /path/to/ckpt_best.pth --detector_onnx artifacts/onnx/face_detector.onnx --classifier_onnx artifacts/onnx/forensics_adapter.onnx
 ```
