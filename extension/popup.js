@@ -344,9 +344,12 @@ async function runClassifier(session, cropCanvas) {
 
   if (classifierSpec.includeBoundaryInput) {
     const ifBoundaryFloat32 = new Float32Array(CONFIG.ifBoundaryLength).fill(1.0);
+    const boundaryData = classifierSpec.boundaryUseFloat16
+      ? float32ArrayToFloat16Bits(ifBoundaryFloat32)
+      : ifBoundaryFloat32;
     feeds.if_boundary = new runtime.Tensor(
-      "float16",
-      float32ArrayToFloat16Bits(ifBoundaryFloat32),
+      classifierSpec.boundaryTensorType,
+      boundaryData,
       [1, CONFIG.ifBoundaryLength],
     );
   }
@@ -359,6 +362,11 @@ function detectClassifierSpec(session) {
   const hasPixelValuesInput = session.inputNames.includes("pixel_values");
   const inputName = hasPixelValuesInput ? "pixel_values" : "image";
   const modelInputSize = getModelInputSpatialSize(session, inputName);
+  const inputTensorType = getSessionTensorType(session, inputName);
+  const includeBoundaryInput = !hasPixelValuesInput && session.inputNames.includes("if_boundary");
+  const boundaryTensorType = includeBoundaryInput
+    ? getSessionTensorType(session, "if_boundary")
+    : null;
 
   return {
     inputName,
@@ -367,10 +375,22 @@ function detectClassifierSpec(session) {
       : modelInputSize || CONFIG.classifierInputSize,
     mean: hasPixelValuesInput ? CONFIG.hfMean : CONFIG.mean,
     std: hasPixelValuesInput ? CONFIG.hfStd : CONFIG.std,
-    tensorType: hasPixelValuesInput ? "float32" : "float16",
-    includeBoundaryInput: !hasPixelValuesInput,
-    useFloat16: !hasPixelValuesInput,
+    tensorType: inputTensorType,
+    includeBoundaryInput,
+    useFloat16: inputTensorType === "float16",
+    boundaryTensorType,
+    boundaryUseFloat16: boundaryTensorType === "float16",
   };
+}
+
+function getSessionTensorType(session, inputName) {
+  const metadataType = session.inputMetadata?.[inputName]?.type;
+
+  if (metadataType === "tensor(float16)") {
+    return "float16";
+  }
+
+  return "float32";
 }
 
 function getModelInputSpatialSize(session, inputName) {
