@@ -56,3 +56,11 @@ target/
 /artifacts/onnx/model_uint8.onnx
 
 .playwright-mcp/
+
+# Local agent / UI scratch files
+.sisyphus/
+/get_heights.js
+/test_canvas.html
+/test_grid.html
+/test_heights.html
+/test_layout.html
